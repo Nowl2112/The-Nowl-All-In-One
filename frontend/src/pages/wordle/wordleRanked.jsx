@@ -14,7 +14,7 @@ const MAX_ATTEMPTS = 6;
 const API_BASE_URL =
     import.meta.env.VITE_API_BASE_URL ||
     import.meta.env.VITE_API_BASE ||
-    "http://localhost:5000";
+    "";
 
 const KEYBOARD_ROWS = [
     ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"],
