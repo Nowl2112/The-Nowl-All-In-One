@@ -6,11 +6,15 @@ import React, {
 } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/authContext.jsx";
+import kotaroImage from "../../assets/kotaro.png";
 import "./wordleRanked.css";
 
 const WORD_LENGTH = 5;
 const MAX_ATTEMPTS = 6;
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
+const API_BASE_URL =
+    import.meta.env.VITE_API_BASE_URL ||
+    import.meta.env.VITE_API_BASE ||
+    "http://localhost:5000";
 
 const KEYBOARD_ROWS = [
     ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"],
@@ -28,8 +32,7 @@ const EMPTY_STATS = {
 
 function WordleRanked() {
     const navigate = useNavigate();
-    const { currentUser } = useAuth();
-    const email = currentUser?.email;
+    const { currentUser, authLoading } = useAuth();
 
     const [guesses, setGuesses] = useState([]);
     const [evaluations, setEvaluations] = useState([]);
@@ -41,28 +44,48 @@ function WordleRanked() {
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     useEffect(() => {
-        if (!email) {
+        if (authLoading) {
+            return undefined;
+        }
+
+        if (!currentUser) {
             setGameStatus("error");
             setMessage("Please log in before playing ranked Wordle.");
-            return;
+            navigate("/login", { replace: true });
+            return undefined;
         }
 
         const controller = new AbortController();
 
         async function loadGame() {
+            setGameStatus("loading");
+            setMessage("");
+
             try {
+                const token = await currentUser.getIdToken();
+
                 const response = await fetch(
-                    `${API_BASE_URL}/api/games/wordle?email=${encodeURIComponent(email)}`,
-                    { signal: controller.signal },
+                    `${API_BASE_URL}/api/games/wordle`,
+                    {
+                        method: "GET",
+                        headers: {
+                            Authorization: `Bearer ${token}`,
+                        },
+                        signal: controller.signal,
+                        cache: "no-store",
+                    },
                 );
+
                 const data = await response.json();
 
                 if (!response.ok) {
                     throw new Error(data.error || "Could not load Wordle.");
                 }
 
-                setGuesses(data.guesses || []);
-                setEvaluations(data.evaluations || []);
+                setGuesses(Array.isArray(data.guesses) ? data.guesses : []);
+                setEvaluations(
+                    Array.isArray(data.evaluations) ? data.evaluations : [],
+                );
                 setStats(data.stats || EMPTY_STATS);
                 setGameStatus(data.status || "playing");
                 setAnswer(data.answer || "");
@@ -71,20 +94,24 @@ function WordleRanked() {
                     setMessage("You already completed today's Wordle.");
                 } else if (data.status === "lost") {
                     setMessage(`Today's word was ${data.answer}.`);
+                } else {
+                    setMessage("");
                 }
             } catch (error) {
                 if (error?.name === "AbortError") {
                     return;
                 }
-                console.error(error);
+
+                console.error("Unable to load Wordle:", error);
                 setGameStatus("error");
                 setMessage(error?.message || "Could not load Wordle.");
             }
         }
 
-        loadGame();
+        void loadGame();
+
         return () => controller.abort();
-    }, [email]);
+    }, [authLoading, currentUser, navigate]);
 
     const keyboardStatuses = useMemo(() => {
         const statuses = {};
@@ -118,7 +145,7 @@ function WordleRanked() {
         if (
             gameStatus !== "playing" ||
             isSubmitting ||
-            !email
+            !currentUser
         ) {
             return;
         }
@@ -132,17 +159,23 @@ function WordleRanked() {
         setMessage("");
 
         try {
+            const token = await currentUser.getIdToken();
+
             const response = await fetch(
                 `${API_BASE_URL}/api/games/wordle/guess`,
                 {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    headers: {
+                        "Content-Type": "application/json",
+                        Authorization: `Bearer ${token}`,
+                    },
                     body: JSON.stringify({
-                        email,
                         guess: currentGuess,
                     }),
+                    cache: "no-store",
                 },
             );
+
             const data = await response.json();
 
             if (!response.ok) {
@@ -179,7 +212,7 @@ function WordleRanked() {
         } finally {
             setIsSubmitting(false);
         }
-    }, [currentGuess, email, gameStatus, isSubmitting]);
+    }, [currentGuess, currentUser, gameStatus, isSubmitting]);
 
     const handleKey = useCallback(
         (key) => {
@@ -378,6 +411,14 @@ function WordleRanked() {
                 </section>
 
                 <aside className="wordle-stats-card">
+                    <div className="wordle-mascot-banner">
+                        <div>
+                            <p className="wordle-small-label">Kotaro says</p>
+                            <strong>Don't be a dumbass you have 6 tries</strong>
+                        </div>
+                        <img src={kotaroImage} alt="Kotaro, the white cat mascot" />
+                    </div>
+
                     <div className="wordle-stats-heading">
                         <div>
                             <p className="wordle-small-label">Ranked profile</p>
