@@ -90,8 +90,8 @@ function LoginPage() {
 
                     <div className="login-mascots" aria-hidden="true">
                         <span className="login-mascots__bubble">Haru ur a fat ah cat</span>
-                        <img src="./src/assets/haru.png" className="login-mascot login-mascot--haru" alt="" />
-                        <img src="./src/assets/kotaro.png" className="login-mascot login-mascot--kotaro" alt="" />
+                        <img src="../../assets/haru.png" className="login-mascot login-mascot--haru" alt="" />
+                        <img src="../../assets/kotaro.png" className="login-mascot login-mascot--kotaro" alt="" />
                     </div>
                 </div>
 
