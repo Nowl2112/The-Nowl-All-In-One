@@ -1,0 +1,428 @@
+import React, {
+    useCallback,
+    useEffect,
+    useMemo,
+    useState,
+} from "react";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "../../context/authContext.jsx";
+import "./wordleRanked.css";
+
+const WORD_LENGTH = 5;
+const MAX_ATTEMPTS = 6;
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
+
+const KEYBOARD_ROWS = [
+    ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"],
+    ["A", "S", "D", "F", "G", "H", "J", "K", "L"],
+    ["ENTER", "Z", "X", "C", "V", "B", "N", "M", "BACKSPACE"],
+];
+
+const EMPTY_STATS = {
+    rankScore: 0,
+    combo: 0,
+    wins: 0,
+    gamesPlayed: 0,
+    bestCombo: 0,
+};
+
+function WordleRanked() {
+    const navigate = useNavigate();
+    const { currentUser } = useAuth();
+    const email = currentUser?.email;
+
+    const [guesses, setGuesses] = useState([]);
+    const [evaluations, setEvaluations] = useState([]);
+    const [currentGuess, setCurrentGuess] = useState("");
+    const [message, setMessage] = useState("");
+    const [gameStatus, setGameStatus] = useState("loading");
+    const [stats, setStats] = useState(EMPTY_STATS);
+    const [answer, setAnswer] = useState("");
+    const [isSubmitting, setIsSubmitting] = useState(false);
+
+    useEffect(() => {
+        if (!email) {
+            setGameStatus("error");
+            setMessage("Please log in before playing ranked Wordle.");
+            return;
+        }
+
+        const controller = new AbortController();
+
+        async function loadGame() {
+            try {
+                const response = await fetch(
+                    `${API_BASE_URL}/api/games/wordle?email=${encodeURIComponent(email)}`,
+                    { signal: controller.signal },
+                );
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || "Could not load Wordle.");
+                }
+
+                setGuesses(data.guesses || []);
+                setEvaluations(data.evaluations || []);
+                setStats(data.stats || EMPTY_STATS);
+                setGameStatus(data.status || "playing");
+                setAnswer(data.answer || "");
+
+                if (data.status === "won") {
+                    setMessage("You already completed today's Wordle.");
+                } else if (data.status === "lost") {
+                    setMessage(`Today's word was ${data.answer}.`);
+                }
+            } catch (error) {
+                if (error?.name === "AbortError") {
+                    return;
+                }
+                console.error(error);
+                setGameStatus("error");
+                setMessage(error?.message || "Could not load Wordle.");
+            }
+        }
+
+        loadGame();
+        return () => controller.abort();
+    }, [email]);
+
+    const keyboardStatuses = useMemo(() => {
+        const statuses = {};
+        const priority = {
+            absent: 1,
+            present: 2,
+            correct: 3,
+        };
+
+        guesses.forEach((guess, guessIndex) => {
+            const result = evaluations[guessIndex] || [];
+
+            guess.split("").forEach((letter, letterIndex) => {
+                const nextStatus = result[letterIndex];
+                const currentStatus = statuses[letter];
+
+                if (
+                    nextStatus &&
+                    (!currentStatus ||
+                        priority[nextStatus] > priority[currentStatus])
+                ) {
+                    statuses[letter] = nextStatus;
+                }
+            });
+        });
+
+        return statuses;
+    }, [evaluations, guesses]);
+
+    const submitGuess = useCallback(async () => {
+        if (
+            gameStatus !== "playing" ||
+            isSubmitting ||
+            !email
+        ) {
+            return;
+        }
+
+        if (currentGuess.length !== WORD_LENGTH) {
+            setMessage("Enter a five-letter word.");
+            return;
+        }
+
+        setIsSubmitting(true);
+        setMessage("");
+
+        try {
+            const response = await fetch(
+                `${API_BASE_URL}/api/games/wordle/guess`,
+                {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        email,
+                        guess: currentGuess,
+                    }),
+                },
+            );
+            const data = await response.json();
+
+            if (!response.ok) {
+                setMessage(data.error || "Could not submit guess.");
+
+                // Invalid dictionary words do not consume an attempt.
+                // Clear the row so the player can immediately enter another word.
+                if (data.code === "invalid_word") {
+                    setCurrentGuess("");
+                }
+                return;
+            }
+
+            setGuesses((previous) => [...previous, data.guess]);
+            setEvaluations((previous) => [
+                ...previous,
+                data.evaluation,
+            ]);
+            setCurrentGuess("");
+            setStats(data.stats);
+            setGameStatus(data.status);
+            setAnswer(data.answer || "");
+
+            if (data.status === "won") {
+                setMessage(
+                    `Correct! You gained ${data.pointsGained} ranked points.`,
+                );
+            } else if (data.status === "lost") {
+                setMessage(`The word was ${data.answer}. Your combo was reset.`);
+            }
+        } catch (error) {
+            console.error(error);
+            setMessage("Could not reach the game server.");
+        } finally {
+            setIsSubmitting(false);
+        }
+    }, [currentGuess, email, gameStatus, isSubmitting]);
+
+    const handleKey = useCallback(
+        (key) => {
+            if (gameStatus !== "playing" || isSubmitting) {
+                return;
+            }
+
+            if (key === "ENTER") {
+                void submitGuess();
+                return;
+            }
+
+            if (key === "BACKSPACE") {
+                setCurrentGuess((previous) => previous.slice(0, -1));
+                setMessage("");
+                return;
+            }
+
+            if (/^[A-Z]$/.test(key) && currentGuess.length < WORD_LENGTH) {
+                setCurrentGuess((previous) => previous + key);
+                setMessage("");
+            }
+        },
+        [currentGuess.length, gameStatus, isSubmitting, submitGuess],
+    );
+
+    useEffect(() => {
+        function handlePhysicalKeyboard(event) {
+            const key = event.key.toUpperCase();
+
+            if (key === "ENTER") {
+                handleKey("ENTER");
+            } else if (key === "BACKSPACE") {
+                handleKey("BACKSPACE");
+            } else if (/^[A-Z]$/.test(key)) {
+                handleKey(key);
+            }
+        }
+
+        window.addEventListener("keydown", handlePhysicalKeyboard);
+        return () => window.removeEventListener("keydown", handlePhysicalKeyboard);
+    }, [handleKey]);
+
+    function renderBoardRow(rowIndex) {
+        const submittedGuess = guesses[rowIndex];
+        const isCurrentRow =
+            rowIndex === guesses.length && gameStatus === "playing";
+
+        const rowValue = submittedGuess
+            ? submittedGuess
+            : isCurrentRow
+              ? currentGuess.padEnd(WORD_LENGTH, " ")
+              : " ".repeat(WORD_LENGTH);
+
+        const statuses = submittedGuess
+            ? evaluations[rowIndex] || Array(WORD_LENGTH).fill("")
+            : Array(WORD_LENGTH).fill("");
+
+        return (
+            <div className="wordle-row" key={rowIndex}>
+                {rowValue.split("").map((letter, columnIndex) => {
+                    const status = statuses[columnIndex];
+
+                    return (
+                        <div
+                            className={[
+                                "wordle-tile",
+                                status ? `wordle-tile--${status}` : "",
+                                letter.trim() && !status
+                                    ? "wordle-tile--filled"
+                                    : "",
+                            ]
+                                .filter(Boolean)
+                                .join(" ")}
+                            key={`${rowIndex}-${columnIndex}`}
+                        >
+                            {letter}
+                        </div>
+                    );
+                })}
+            </div>
+        );
+    }
+
+    const winRate =
+        stats.gamesPlayed > 0
+            ? Math.round((stats.wins / stats.gamesPlayed) * 100)
+            : 0;
+
+    return (
+        <main className="wordle-page">
+            <header className="wordle-topbar">
+                <button
+                    type="button"
+                    className="wordle-back-button"
+                    onClick={() => navigate("/")}
+                    aria-label="Return to homepage"
+                >
+                    ←
+                </button>
+
+                <div className="wordle-title-group">
+                    <h1>Wordle Ranked</h1>
+                    <p>Daily five-letter challenge</p>
+                </div>
+
+                <div className="wordle-rank-badge">
+                    {stats.rankScore} pts
+                </div>
+            </header>
+
+            <div className="wordle-layout">
+                <section className="wordle-game-card">
+                    <div className="wordle-game-header">
+                        <div>
+                            <p className="wordle-small-label">Ranked score</p>
+                            <strong>{stats.rankScore}</strong>
+                        </div>
+
+                        <div className="wordle-attempt-counter">
+                            Attempt{" "}
+                            {Math.min(guesses.length + 1, MAX_ATTEMPTS)} of{" "}
+                            {MAX_ATTEMPTS}
+                        </div>
+                    </div>
+
+                    <div className="wordle-board" aria-label="Wordle game board">
+                        {Array.from(
+                            { length: MAX_ATTEMPTS },
+                            (_, index) => renderBoardRow(index),
+                        )}
+                    </div>
+
+                    <div
+                        className={`wordle-message ${
+                            gameStatus !== "playing"
+                                ? "wordle-message--result"
+                                : ""
+                        }`}
+                        role="status"
+                    >
+                        {message ||
+                            (gameStatus === "loading"
+                                ? "Loading today's Wordle..."
+                                : "Guess the daily five-letter word.")}
+                    </div>
+
+                    <div className="wordle-keyboard">
+                        {KEYBOARD_ROWS.map((row, rowIndex) => (
+                            <div
+                                className="wordle-keyboard-row"
+                                key={rowIndex}
+                            >
+                                {row.map((key) => {
+                                    const status = keyboardStatuses[key];
+
+                                    return (
+                                        <button
+                                            type="button"
+                                            key={key}
+                                            onClick={() => handleKey(key)}
+                                            className={[
+                                                "wordle-key",
+                                                key.length > 1
+                                                    ? "wordle-key--wide"
+                                                    : "",
+                                                status
+                                                    ? `wordle-key--${status}`
+                                                    : "",
+                                            ]
+                                                .filter(Boolean)
+                                                .join(" ")}
+                                            disabled={
+                                                gameStatus !== "playing" ||
+                                                isSubmitting
+                                            }
+                                        >
+                                            {key === "BACKSPACE" ? "⌫" : key}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        ))}
+                    </div>
+
+                    {gameStatus !== "playing" &&
+                        gameStatus !== "loading" && (
+                            <button
+                                type="button"
+                                className="wordle-home-button"
+                                onClick={() => navigate("/")}
+                            >
+                                Return home
+                            </button>
+                        )}
+                </section>
+
+                <aside className="wordle-stats-card">
+                    <div className="wordle-stats-heading">
+                        <div>
+                            <p className="wordle-small-label">Ranked profile</p>
+                            <h2>{stats.rankScore} points</h2>
+                        </div>
+
+                        <div className="wordle-rating-circle">
+                            ×{stats.combo}
+                        </div>
+                    </div>
+
+                    <div className="wordle-stats-grid">
+                        <div>
+                            <strong>{stats.gamesPlayed}</strong>
+                            <span>Played</span>
+                        </div>
+
+                        <div>
+                            <strong>{winRate}%</strong>
+                            <span>Win rate</span>
+                        </div>
+
+                        <div>
+                            <strong>{stats.combo}</strong>
+                            <span>Current combo</span>
+                        </div>
+
+                        <div>
+                            <strong>{stats.bestCombo}</strong>
+                            <span>Best combo</span>
+                        </div>
+                    </div>
+
+                    <div className="wordle-ranking-note">
+                        <strong>Daily scoring</strong>
+                        <p>
+                            Points gained = (6 − attempts used) × combo.
+                            Missing a day or losing resets your combo.
+                        </p>
+                        {answer && <p>Today's answer: {answer}</p>}
+                    </div>
+                </aside>
+            </div>
+        </main>
+    );
+}
+
+export default WordleRanked;

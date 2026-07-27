@@ -1,0 +1,12 @@
+{
+  "name": "the-nowl-all-in-one",
+  "private": true,
+  "scripts": {
+    "frontend": "npm --prefix frontend run dev",
+    "backend": "python backend/app.py",
+    "start": "concurrently -n frontend,backend -c blue,green \"npm run frontend\" \"npm run backend\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
