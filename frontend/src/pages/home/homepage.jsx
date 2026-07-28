@@ -10,6 +10,69 @@ const API_BASE_URL =
     import.meta.env.VITE_API_BASE ||
     "";
 
+
+function getItemDate(item) {
+    const rawDate =
+        item?.itemType === "event"
+            ? item?.startAt
+            : item?.dueAt;
+
+    if (!rawDate) return null;
+
+    const parsedDate = new Date(rawDate);
+    return Number.isNaN(parsedDate.getTime()) ? null : parsedDate;
+}
+
+function isWithinNextSevenDays(item) {
+    const itemDate = getItemDate(item);
+    if (!itemDate) return false;
+
+    const now = new Date();
+    const sevenDaysFromNow = new Date(now);
+    sevenDaysFromNow.setDate(now.getDate() + 7);
+
+    return itemDate >= now && itemDate < sevenDaysFromNow;
+}
+
+function formatUpcomingDate(item) {
+    const itemDate = getItemDate(item);
+    if (!itemDate) return "Date unavailable";
+
+    if (item?.allDay) {
+        return itemDate.toLocaleDateString("en-SG", {
+            weekday: "short",
+            day: "numeric",
+            month: "short",
+        });
+    }
+
+    return itemDate.toLocaleString("en-SG", {
+        weekday: "short",
+        day: "numeric",
+        month: "short",
+        hour: "numeric",
+        minute: "2-digit",
+    });
+}
+
+function getUpcomingDay(item) {
+    const itemDate = getItemDate(item);
+    if (!itemDate) return "--";
+
+    return itemDate.toLocaleDateString("en-SG", {
+        day: "2-digit",
+    });
+}
+
+function getUpcomingMonth(item) {
+    const itemDate = getItemDate(item);
+    if (!itemDate) return "---";
+
+    return itemDate.toLocaleDateString("en-SG", {
+        month: "short",
+    });
+}
+
 async function readJsonResponse(response) {
     const contentType = response.headers.get("content-type") || "";
 
@@ -33,6 +96,10 @@ function HomePage() {
     const [leaderboard, setLeaderboard] = useState([]);
     const [leaderboardStatus, setLeaderboardStatus] = useState("idle");
     const [leaderboardError, setLeaderboardError] = useState("");
+
+    const [upcomingItems, setUpcomingItems] = useState([]);
+    const [upcomingStatus, setUpcomingStatus] = useState("idle");
+    const [upcomingError, setUpcomingError] = useState("");
 
     const getAuthHeaders = useCallback(async () => {
         if (!currentUser) {
@@ -144,17 +211,83 @@ function HomePage() {
         [currentUser, getAuthHeaders],
     );
 
+
+    const loadUpcomingItems = useCallback(
+        async (signal) => {
+            if (!currentUser) {
+                setUpcomingItems([]);
+                setUpcomingStatus("idle");
+                return;
+            }
+
+            setUpcomingStatus("loading");
+            setUpcomingError("");
+
+            try {
+                const headers = await getAuthHeaders();
+                const response = await fetch(
+                    `${API_BASE_URL}/api/calendar/items/upcoming?limit=50`,
+                    {
+                        method: "GET",
+                        headers,
+                        signal,
+                        cache: "no-store",
+                    },
+                );
+
+                const data = await readJsonResponse(response);
+
+                if (!response.ok) {
+                    throw new Error(
+                        data.error || "Could not load upcoming calendar items.",
+                    );
+                }
+
+                const nextSevenDays = (
+                    Array.isArray(data.items) ? data.items : []
+                )
+                    .filter(isWithinNextSevenDays)
+                    .filter(
+                        (item) =>
+                            !(
+                                item.itemType === "task" &&
+                                item.status === "completed"
+                            ),
+                    )
+                    .sort(
+                        (firstItem, secondItem) =>
+                            getItemDate(firstItem) - getItemDate(secondItem),
+                    );
+
+                setUpcomingItems(nextSevenDays);
+                setUpcomingStatus("success");
+            } catch (error) {
+                if (error?.name === "AbortError") return;
+
+                console.error("Unable to load upcoming items:", error);
+                setUpcomingItems([]);
+                setUpcomingError(
+                    error?.message || "Could not load upcoming calendar items.",
+                );
+                setUpcomingStatus("error");
+            }
+        },
+        [currentUser, getAuthHeaders],
+    );
+
     const refreshHomeData = useCallback(async () => {
         await Promise.all([
             loadCurrentPlayer(),
             loadLeaderboard(),
+            loadUpcomingItems(),
         ]);
-    }, [loadCurrentPlayer, loadLeaderboard]);
+    }, [loadCurrentPlayer, loadLeaderboard, loadUpcomingItems]);
 
     useEffect(() => {
         if (!currentUser?.uid) {
             setCurrentPlayer(null);
             setLeaderboard([]);
+            setUpcomingItems([]);
             return undefined;
         }
 
@@ -163,6 +296,7 @@ function HomePage() {
         Promise.all([
             loadCurrentPlayer(controller.signal),
             loadLeaderboard(controller.signal),
+            loadUpcomingItems(controller.signal),
         ]);
 
         return () => controller.abort();
@@ -170,6 +304,7 @@ function HomePage() {
         currentUser?.uid,
         loadCurrentPlayer,
         loadLeaderboard,
+        loadUpcomingItems,
     ]);
 
     const leaderboardPlayer = useMemo(
@@ -204,6 +339,8 @@ function HomePage() {
             setLeaderboard([]);
             setPlayerError("");
             setLeaderboardError("");
+            setUpcomingItems([]);
+            setUpcomingError("");
 
             await logout();
             navigate("/login", { replace: true });
@@ -222,9 +359,15 @@ function HomePage() {
                         onClick={() => navigate("/")}
                         aria-label="Go to homepage"
                     >
-                        <span className="brand-mark__badge">N</span>
+                        <img
+                            src={kotaroImage}
+                            alt="Kotaro"
+                            className="brand-logo"
+                            style={{ width: "auto", height: "80px" }}
+                        />
+
                         <span>
-                            <strong>The Nowl In One</strong>
+                            <h1>The Nowl In One</h1>
                         </span>
                     </button>
 
@@ -236,6 +379,116 @@ function HomePage() {
                         Log out
                     </button>
                 </header>
+
+
+                <section className="upcoming-week-card">
+                    <div className="upcoming-week-card__header">
+                        <div>
+                            <p className="home-section-label">
+                                Your week ahead
+                            </p>
+                            <h2>Upcoming items</h2>
+                            <p>
+                                Events, tasks, and reminders scheduled within
+                                the next seven days.
+                            </p>
+                        </div>
+
+                        <div className="upcoming-week-card__actions">
+                            <button
+                                type="button"
+                                className="button button--ghost"
+                                onClick={() => navigate("/calendar")}
+                            >
+                                Open calendar
+                            </button>
+
+                            <button
+                                type="button"
+                                className="upcoming-refresh-button"
+                                onClick={() => loadUpcomingItems()}
+                                disabled={upcomingStatus === "loading"}
+                            >
+                                {upcomingStatus === "loading"
+                                    ? "Loading..."
+                                    : "Refresh"}
+                            </button>
+                        </div>
+                    </div>
+
+                    {upcomingStatus === "loading" && (
+                        <div className="upcoming-state">
+                            Loading your week...
+                        </div>
+                    )}
+
+                    {upcomingStatus === "error" && (
+                        <div className="upcoming-state upcoming-state--error">
+                            {upcomingError}
+                        </div>
+                    )}
+
+                    {upcomingStatus === "success" &&
+                        upcomingItems.length === 0 && (
+                            <div className="upcoming-empty">
+                                <div
+                                    className="upcoming-empty__icon"
+                                    aria-hidden="true"
+                                >
+                                    ✓
+                                </div>
+                                <div>
+                                    <strong>Your week is clear.</strong>
+                                    <span>
+                                        Add an event, task, or reminder from
+                                        the calendar.
+                                    </span>
+                                </div>
+                            </div>
+                        )}
+
+                    {upcomingStatus === "success" &&
+                        upcomingItems.length > 0 && (
+                            <div className="upcoming-list">
+                                {upcomingItems.map((item) => (
+                                    <button
+                                        type="button"
+                                        className={`upcoming-item upcoming-item--${item.itemType}`}
+                                        key={item.id}
+                                        onClick={() => navigate("/calendar")}
+                                    >
+                                        <span className="upcoming-item__date-block" aria-hidden="true">
+                                            <strong>{getUpcomingDay(item)}</strong>
+                                            <span>{getUpcomingMonth(item)}</span>
+                                        </span>
+
+                                        <span className="upcoming-item__content">
+                                            <span className="upcoming-item__topline">
+                                                <strong>{item.title}</strong>
+                                                <span className={`upcoming-item__type upcoming-item__type--${item.itemType}`}>
+                                                    {item.itemType}
+                                                </span>
+                                            </span>
+
+                                            <span className="upcoming-item__date">
+                                                {formatUpcomingDate(item)}
+                                            </span>
+
+                                            {item.description && (
+                                                <span className="upcoming-item__description">
+                                                    {item.description}
+                                                </span>
+                                            )}
+                                        </span>
+
+                                        <span className="upcoming-item__arrow" aria-hidden="true">
+                                            →
+                                        </span>
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                </section>
 
                 <section className="home-hero">
                     <div className="home-hero__copy">
@@ -388,12 +641,11 @@ function HomePage() {
                     </article>
 
                     <aside className="coming-soon-card">
-                        <div className="coming-soon-card__mascot-wrap">
                             <img
+                                className="coming-soon-mascot"
                                 src={haruImage}
                                 alt="Haru, the orange cat mascot"
                             />
-                        </div>
 
                         <div>
                             <p className="home-section-label">

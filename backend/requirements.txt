@@ -5,3 +5,6 @@ google-cloud-firestore
 python-dotenv
 requests
 gunicorn
+hashlib
+secrets
+html

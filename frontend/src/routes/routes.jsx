@@ -6,6 +6,7 @@ import HomePage from "../pages/home/homepage.jsx";
 import LoginPage from "../pages/login/login.jsx";
 import WordleRanked from "../pages/wordle/wordleRanked.jsx";
 import ResetPasswordPage from "../pages/resetPassword/resetPassword.jsx";
+import CalendarPage from "../pages/calendar/calendar.jsx";
 function AppRoutes() {
     return (
         <Routes>
@@ -25,6 +26,14 @@ function AppRoutes() {
                 element={
                     <ProtectedRoute>
                         <WordleRanked />
+                    </ProtectedRoute>
+                }
+            />
+            <Route
+                path="/calendar"
+                element={
+                    <ProtectedRoute>
+                        <CalendarPage />
                     </ProtectedRoute>
                 }
             />
