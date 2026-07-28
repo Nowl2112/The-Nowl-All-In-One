@@ -261,6 +261,19 @@ def _normalize_email(email: str | None) -> str:
     return (email or "").strip().lower()
 
 
+def _profile_picture_link(user: dict[str, Any] | None) -> str:
+    if not isinstance(user, dict):
+        return ""
+
+    # Firestore uses profile_pic_link. The camelCase fallback keeps the
+    # backend compatible if an older document used the frontend field name.
+    return str(
+        user.get("profile_pic_link")
+        or user.get("profilePicLink")
+        or ""
+    ).strip()
+
+
 def _today_key() -> str:
     return datetime.now(SINGAPORE_TZ).date().isoformat()
 
@@ -591,6 +604,7 @@ def _resolve_tagged_users(
                     tagged_user.get("displayName") or "User"
                 ).strip(),
                 "email": _normalize_email(tagged_user.get("email")),
+                "profilePicLink": _profile_picture_link(tagged_user),
             }
         )
 
@@ -977,6 +991,7 @@ def _default_user(
             )
         ),
         "mustResetPassword": False,
+        "profile_pic_link": "",
         "createdAt": _now_iso(),
     }
 
@@ -1384,6 +1399,7 @@ def _build_leaderboard() -> list[dict[str, Any]]:
                 "id": uid,
                 "userId": uid,
                 "displayName": display_name,
+                "profilePicLink": _profile_picture_link(user),
                 "rankScore": int(
                     stats.get("rankScore", 0)
                 ),
@@ -1617,6 +1633,7 @@ def auth_session():
             "uid": identity["uid"],
             "email": identity["email"],
             "displayName": user.get("displayName"),
+            "profilePicLink": _profile_picture_link(user),
             "mustResetPassword": bool(
                 identity["claims"].get(
                     "mustResetPassword",
@@ -1722,6 +1739,7 @@ def search_users_for_tagging():
                     "uid": snapshot.id,
                     "displayName": display_name or "User",
                     "email": email,
+                    "profilePicLink": _profile_picture_link(user),
                 }
             )
 
@@ -2847,6 +2865,7 @@ def get_current_wordle_player():
             if email
             else "Player"
         ),
+        "profilePicLink": _profile_picture_link(user),
         "rank": (
             leaderboard_entry.get("rank")
             if leaderboard_entry

@@ -753,10 +753,28 @@ function HomePage() {
                                                     <td>
                                                         <div className="leaderboard-player">
                                                             <span className="leaderboard-avatar">
-                                                                {player.displayName
-                                                                    ?.charAt(0)
-                                                                    .toUpperCase() ||
-                                                                    "?"}
+                                                                <span
+                                                                    className="leaderboard-avatar__fallback"
+                                                                    aria-hidden="true"
+                                                                >
+                                                                    {player.displayName
+                                                                        ?.charAt(0)
+                                                                        .toUpperCase() ||
+                                                                        "?"}
+                                                                </span>
+
+                                                                {player.profilePicLink && (
+                                                                    <img
+                                                                        src={player.profilePicLink}
+                                                                        alt={`${player.displayName || "Player"} profile`}
+                                                                        className="leaderboard-avatar__image"
+                                                                        loading="lazy"
+                                                                        referrerPolicy="no-referrer"
+                                                                        onError={(event) => {
+                                                                            event.currentTarget.style.display = "none";
+                                                                        }}
+                                                                    />
+                                                                )}
                                                             </span>
 
                                                             <div>
