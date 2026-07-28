@@ -5,6 +5,3 @@ google-cloud-firestore
 python-dotenv
 requests
 gunicorn
-
-secrets
-html
