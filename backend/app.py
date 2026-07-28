@@ -866,7 +866,7 @@ def _build_week_ahead_message(
 
     lines.extend(
         [
-            "Open The Nowl to view or update your calendar.",
+            "Open The Nowl In One to view or update your calendar.",
             "",
             "Use /unsubscribe to stop these messages.",
         ]
@@ -877,7 +877,7 @@ def _build_week_ahead_message(
     if len(message) > 4000:
         message = (
             message[:3900].rstrip()
-            + "\n\nMore items are available in The Nowl."
+            + "\n\nMore items are available in The Nowl In One."
         )
 
     return message
@@ -2327,7 +2327,7 @@ def telegram_webhook():
                 _send_telegram_message(
                     chat_id,
                     (
-                        "To connect your Nowl account, open The Nowl "
+                        "To connect your account, open The Nowl In One "
                         "website and press <b>Connect Telegram</b>.\n\n"
                         "Once connected, I can send your upcoming "
                         "events, tasks, and reminders."
@@ -2516,7 +2516,7 @@ def telegram_webhook():
                 chat_id,
                 (
                     "Daily reminders have been disabled. "
-                    "You can reconnect from The Nowl at any time."
+                    "You can reconnect from The Nowl In One at any time."
                 ),
             )
 
@@ -2524,7 +2524,7 @@ def telegram_webhook():
             _send_telegram_message(
                 chat_id,
                 (
-                    "<b>The Nowl Reminder Bot</b>\n\n"
+                    "<b>The Kotaro Reminders Bot</b>\n\n"
                     "/upcoming — View the next seven days\n"
                     "/status — Check reminder status\n"
                     "/unsubscribe — Stop reminders\n"
@@ -2688,7 +2688,7 @@ def send_telegram_test_message():
         _send_telegram_message(
             subscription["chatId"],
             (
-                "<b>The Nowl test reminder</b> 🦉\n\n"
+                "<b>The Nowl In One test reminder</b> 🦉\n\n"
                 "Your Telegram subscription is working correctly."
             ),
         )
