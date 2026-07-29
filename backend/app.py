@@ -1896,6 +1896,36 @@ def create_calendar_item():
             return jsonify(
                 {"error": "Calendar items cannot be created in the past"}
             ), 400
+    elif item_type == "task":
+        start_at, datetime_error = _parse_calendar_datetime(
+            payload.get("startAt"),
+            "startAt",
+        )
+        if datetime_error:
+            return jsonify({"error": datetime_error}), 400
+
+        due_at, datetime_error = _parse_calendar_datetime(
+            payload.get("dueAt"),
+            "dueAt",
+        )
+        if datetime_error:
+            return jsonify({"error": datetime_error}), 400
+
+        if due_at < start_at:
+            return jsonify(
+                {"error": "dueAt must be the same as or later than startAt"}
+            ), 400
+
+        if all_day:
+            if start_at.date() < today:
+                return jsonify(
+                    {"error": "Calendar items cannot be created in the past"}
+                ), 400
+        elif start_at < now_datetime:
+            return jsonify(
+                {"error": "Calendar items cannot be created in the past"}
+            ), 400
+
     else:
         due_at, datetime_error = _parse_calendar_datetime(
             payload.get("dueAt"),
@@ -2171,6 +2201,63 @@ def update_calendar_item(item_id: str):
                 {
                     "error": (
                         "endAt must be the same as or later "
+                        "than startAt"
+                    )
+                }
+            ), 400
+
+        if all_day:
+            if start_at.date() < today:
+                return jsonify(
+                    {
+                        "error": (
+                            "Calendar items cannot be moved "
+                            "into the past"
+                        )
+                    }
+                ), 400
+        elif start_at < now_datetime:
+            return jsonify(
+                {
+                    "error": (
+                        "Calendar items cannot be moved "
+                        "into the past"
+                    )
+                }
+            ), 400
+
+    elif item_type == "task":
+        start_at, datetime_error = _parse_calendar_datetime(
+            payload.get(
+                "startAt",
+                existing_item.get("startAt"),
+            ),
+            "startAt",
+        )
+
+        if datetime_error:
+            return jsonify(
+                {"error": datetime_error}
+            ), 400
+
+        due_at, datetime_error = _parse_calendar_datetime(
+            payload.get(
+                "dueAt",
+                existing_item.get("dueAt"),
+            ),
+            "dueAt",
+        )
+
+        if datetime_error:
+            return jsonify(
+                {"error": datetime_error}
+            ), 400
+
+        if due_at < start_at:
+            return jsonify(
+                {
+                    "error": (
+                        "dueAt must be the same as or later "
                         "than startAt"
                     )
                 }

@@ -16,9 +16,12 @@ const EMPTY_FORM = {
     itemType: "event",
     title: "",
     description: "",
-    date: "",
+    startDate: "",
     startTime: "09:00",
+    endDate: "",
     endTime: "10:00",
+    dueDate: "",
+    dueTime: "17:00",
     allDay: false,
     visibility: "personal",
     taggedUserIds: [],
@@ -48,24 +51,38 @@ function isPastDate(date) {
     return candidate < today;
 }
 
-function isPastFormDateTime(form) {
-    if (!form.date) return false;
+function isPastDateTime(date, time, allDay = false) {
+    if (!date) return false;
 
     const todayKey = todayDateKey();
-
-    if (form.date < todayKey) {
-        return true;
-    }
-
-    if (form.allDay || form.date > todayKey) {
-        return false;
-    }
+    if (date < todayKey) return true;
+    if (allDay || date > todayKey) return false;
 
     const selected = new Date(
-        `${form.date}T${form.startTime || "00:00"}:00+08:00`,
+        `${date}T${time || "00:00"}:00+08:00`,
     );
 
     return selected.getTime() < Date.now();
+}
+
+function formStartDateTime(form) {
+    if (form.itemType === "reminder") {
+        return buildIso(form.dueDate, form.dueTime, form.allDay);
+    }
+
+    return buildIso(form.startDate, form.startTime, form.allDay);
+}
+
+function formEndDateTime(form) {
+    if (form.itemType === "event") {
+        return buildIso(form.endDate, form.endTime, form.allDay);
+    }
+
+    if (form.itemType === "task") {
+        return buildIso(form.dueDate, form.dueTime, form.allDay);
+    }
+
+    return formStartDateTime(form);
 }
 
 function parseDateOnly(value) {
@@ -111,9 +128,103 @@ function buildIso(date, time, allDay = false) {
 }
 
 function itemDateKey(item) {
-    const raw = item.startAt || item.dueAt || item.date;
+    const raw = item.startAt || item.dueAt || item.endAt;
     if (!raw) return "";
     return raw.slice(0, 10);
+}
+
+function itemRange(item) {
+    let startRaw = item.startAt || item.dueAt;
+    let endRaw = startRaw;
+
+    if (item.itemType === "event") {
+        endRaw = item.endAt || startRaw;
+    } else if (item.itemType === "task") {
+        endRaw = item.dueAt || startRaw;
+    }
+
+    const start = parseDateOnly(startRaw);
+    const end = parseDateOnly(endRaw);
+
+    if (!start || !end) return null;
+
+    return end < start
+        ? { start, end: start }
+        : { start, end };
+}
+
+function daysBetween(first, second) {
+    const millisecondsPerDay = 24 * 60 * 60 * 1000;
+    const firstUtc = Date.UTC(
+        first.getFullYear(),
+        first.getMonth(),
+        first.getDate(),
+    );
+    const secondUtc = Date.UTC(
+        second.getFullYear(),
+        second.getMonth(),
+        second.getDate(),
+    );
+
+    return Math.round((secondUtc - firstUtc) / millisecondsPerDay);
+}
+
+function buildWeekSegments(weekCells, items) {
+    if (!weekCells.length) return [];
+
+    const weekStart = weekCells[0].date;
+    const weekEnd = weekCells[weekCells.length - 1].date;
+
+    const candidates = items
+        .map((item) => {
+            const range = itemRange(item);
+            if (!range || range.end < weekStart || range.start > weekEnd) {
+                return null;
+            }
+
+            const visibleStart = range.start < weekStart
+                ? weekStart
+                : range.start;
+            const visibleEnd = range.end > weekEnd
+                ? weekEnd
+                : range.end;
+
+            return {
+                item,
+                range,
+                startColumn: daysBetween(weekStart, visibleStart) + 1,
+                endColumn: daysBetween(weekStart, visibleEnd) + 2,
+                continuesBefore: range.start < weekStart,
+                continuesAfter: range.end > weekEnd,
+            };
+        })
+        .filter(Boolean)
+        .sort((first, second) => {
+            if (first.startColumn !== second.startColumn) {
+                return first.startColumn - second.startColumn;
+            }
+
+            return second.endColumn - first.endColumn;
+        });
+
+    const laneEndColumns = [];
+
+    return candidates.map((segment) => {
+        let lane = laneEndColumns.findIndex(
+            (endColumn) => endColumn <= segment.startColumn,
+        );
+
+        if (lane === -1) {
+            lane = laneEndColumns.length;
+        }
+
+        laneEndColumns[lane] = segment.endColumn;
+
+        return {
+            ...segment,
+            lane,
+        };
+    });
 }
 
 function itemTimeLabel(item) {
@@ -481,26 +592,29 @@ async function handleConnectTelegram() {
         });
     }, [visibleMonth]);
 
-    const itemsByDate = useMemo(() => {
-        const grouped = {};
+    const monthWeeks = useMemo(
+        () =>
+            Array.from({ length: 6 }, (_, weekIndex) => {
+                const cells = monthCells.slice(
+                    weekIndex * 7,
+                    weekIndex * 7 + 7,
+                );
+                const segments = buildWeekSegments(cells, items);
+                const laneCount = segments.reduce(
+                    (highest, segment) =>
+                        Math.max(highest, segment.lane + 1),
+                    0,
+                );
 
-        items.forEach((item) => {
-            const key = itemDateKey(item);
-            if (!key) return;
-            if (!grouped[key]) grouped[key] = [];
-            grouped[key].push(item);
-        });
-
-        Object.values(grouped).forEach((dayItems) => {
-            dayItems.sort((a, b) => {
-                const first = a.startAt || a.dueAt || "";
-                const second = b.startAt || b.dueAt || "";
-                return first.localeCompare(second);
-            });
-        });
-
-        return grouped;
-    }, [items]);
+                return {
+                    key: cells[0]?.key || `week-${weekIndex}`,
+                    cells,
+                    segments,
+                    laneCount,
+                };
+            }),
+        [monthCells, items],
+    );
 
     const kotaroMessage = useMemo(
         () => getKotaroMessage(upcomingItems, status),
@@ -517,7 +631,9 @@ async function handleConnectTelegram() {
         setEditingItem(null);
         setForm({
             ...EMPTY_FORM,
-            date: dateKey,
+            startDate: dateKey,
+            endDate: dateKey,
+            dueDate: dateKey,
         });
         setSelectedUsers([]);
         setUserQuery("");
@@ -527,17 +643,22 @@ async function handleConnectTelegram() {
     }
 
     function openEditModal(item) {
-        const rawStart = item.startAt || item.dueAt || "";
+        const rawStart = item.startAt || "";
         const rawEnd = item.endAt || "";
+        const rawDue = item.dueAt || "";
+        const fallbackDate = itemDateKey(item) || todayDateKey();
 
         setEditingItem(item);
         setForm({
             itemType: item.itemType || "event",
             title: item.title || "",
             description: item.description || "",
-            date: itemDateKey(item),
+            startDate: rawStart.slice(0, 10) || fallbackDate,
             startTime: rawStart.slice(11, 16) || "09:00",
+            endDate: rawEnd.slice(0, 10) || fallbackDate,
             endTime: rawEnd.slice(11, 16) || "10:00",
+            dueDate: rawDue.slice(0, 10) || fallbackDate,
+            dueTime: rawDue.slice(11, 16) || "17:00",
             allDay: Boolean(item.allDay),
             visibility: item.visibility || "personal",
             taggedUserIds: Array.isArray(item.taggedUserIds)
@@ -652,25 +773,33 @@ async function handleConnectTelegram() {
 
         if (form.itemType === "event") {
             payload.startAt = buildIso(
-                form.date,
+                form.startDate,
                 form.startTime,
                 form.allDay,
             );
             payload.endAt = buildIso(
-                form.date,
+                form.endDate,
                 form.endTime,
                 form.allDay,
             );
-        } else {
-            payload.dueAt = buildIso(
-                form.date,
+        } else if (form.itemType === "task") {
+            payload.startAt = buildIso(
+                form.startDate,
                 form.startTime,
                 form.allDay,
             );
-        }
-
-        if (form.itemType === "task") {
+            payload.dueAt = buildIso(
+                form.dueDate,
+                form.dueTime,
+                form.allDay,
+            );
             payload.status = form.status;
+        } else {
+            payload.dueAt = buildIso(
+                form.dueDate,
+                form.dueTime,
+                form.allDay,
+            );
         }
 
         return payload;
@@ -684,26 +813,48 @@ async function handleConnectTelegram() {
             return;
         }
 
-        if (!form.date) {
-            setFormError("Choose a date.");
+        if (form.itemType === "event") {
+            if (!form.startDate || !form.endDate) {
+                setFormError("Choose both a start date and an end date.");
+                return;
+            }
+        } else if (form.itemType === "task") {
+            if (!form.startDate || !form.dueDate) {
+                setFormError("Choose both a start date and a deadline date.");
+                return;
+            }
+        } else if (!form.dueDate) {
+            setFormError("Choose a reminder date.");
             return;
         }
 
-        if (!editingItem && isPastFormDateTime(form)) {
+        const startValue = formStartDateTime(form);
+        const endValue = formEndDateTime(form);
+
+        if (!editingItem) {
+            const firstDate = form.itemType === "reminder"
+                ? form.dueDate
+                : form.startDate;
+            const firstTime = form.itemType === "reminder"
+                ? form.dueTime
+                : form.startTime;
+
+            if (isPastDateTime(firstDate, firstTime, form.allDay)) {
+                setFormError(
+                    form.allDay
+                        ? "Choose today or a future date."
+                        : "Choose a start time that has not already passed.",
+                );
+                return;
+            }
+        }
+
+        if (startValue && endValue && endValue < startValue) {
             setFormError(
-                form.allDay
-                    ? "Choose today or a future date."
-                    : "Choose a time that has not already passed.",
+                form.itemType === "task"
+                    ? "The deadline cannot be earlier than the task start."
+                    : "The event end cannot be earlier than the event start.",
             );
-            return;
-        }
-
-        if (
-            form.itemType === "event" &&
-            !form.allDay &&
-            form.endTime < form.startTime
-        ) {
-            setFormError("The end time cannot be earlier than the start time.");
             return;
         }
 
@@ -918,99 +1069,115 @@ async function handleConnectTelegram() {
                             className="calendar-grid"
                             aria-label={`${formatMonth(visibleMonth)} calendar`}
                         >
-                            {monthCells.map((cell) => {
-                                const dayItems = itemsByDate[cell.key] || [];
-
-                                return (
-                                    <div
-                                        key={cell.key}
-                                        className={[
-                                            "calendar-day",
-                                            !cell.isCurrentMonth
-                                                ? "calendar-day--muted"
-                                                : "",
-                                            cell.isToday
-                                                ? "calendar-day--today"
-                                                : "",
-                                            cell.isPast
-                                                ? "calendar-day--past"
-                                                : "",
-                                        ]
-                                            .filter(Boolean)
-                                            .join(" ")}
-                                        onClick={() => {
-                                            if (!cell.isPast) {
-                                                openCreateModal(cell.date);
-                                            }
-                                        }}
-                                        onKeyDown={(event) => {
-                                            if (
-                                                !cell.isPast &&
-                                                (event.key === "Enter" ||
-                                                    event.key === " ")
-                                            ) {
-                                                openCreateModal(cell.date);
-                                            }
-                                        }}
-                                        role="button"
-                                        tabIndex={cell.isPast ? -1 : 0}
-                                        aria-disabled={cell.isPast}
-                                    >
-                                        <div className="calendar-day__header">
-                                            <span>{cell.date.getDate()}</span>
-                                            {!cell.isPast && (
-                                                <span className="calendar-day__plus">
-                                                    +
-                                                </span>
-                                            )}
-                                        </div>
-
-                                        <div className="calendar-day__items">
-                                            {dayItems.slice(0, 3).map((item) => (
-                                                <button
-                                                    type="button"
-                                                    key={item.id}
-                                                    className={`calendar-item calendar-item--${item.itemType}`}
-                                                    onClick={(event) => {
-                                                        event.stopPropagation();
-                                                        openEditModal(item);
-                                                    }}
-                                                    title={item.title}
-                                                >
-                                                    <span className="calendar-item__time">
-                                                        {itemTimeLabel(item)}
-                                                    </span>
-                                                    <span className="calendar-item__title">
-                                                        {item.title}
-                                                    </span>
-                                                    {item.taggedUserIds?.length >
-                                                        0 && (
-                                                        <span
-                                                            className="calendar-item__tag"
-                                                            aria-label="Tagged users"
-                                                        >
-                                                            @
+                            {monthWeeks.map((week) => (
+                                <div
+                                    className="calendar-week-row"
+                                    key={week.key}
+                                    style={{
+                                        "--calendar-lanes": Math.max(
+                                            week.laneCount,
+                                            1,
+                                        ),
+                                    }}
+                                >
+                                    <div className="calendar-week-days">
+                                        {week.cells.map((cell) => (
+                                            <div
+                                                key={cell.key}
+                                                className={[
+                                                    "calendar-day",
+                                                    !cell.isCurrentMonth
+                                                        ? "calendar-day--muted"
+                                                        : "",
+                                                    cell.isToday
+                                                        ? "calendar-day--today"
+                                                        : "",
+                                                    cell.isPast
+                                                        ? "calendar-day--past"
+                                                        : "",
+                                                ]
+                                                    .filter(Boolean)
+                                                    .join(" ")}
+                                                onClick={() => {
+                                                    if (!cell.isPast) {
+                                                        openCreateModal(cell.date);
+                                                    }
+                                                }}
+                                                onKeyDown={(event) => {
+                                                    if (
+                                                        !cell.isPast &&
+                                                        (event.key === "Enter" ||
+                                                            event.key === " ")
+                                                    ) {
+                                                        openCreateModal(cell.date);
+                                                    }
+                                                }}
+                                                role="button"
+                                                tabIndex={cell.isPast ? -1 : 0}
+                                                aria-disabled={cell.isPast}
+                                            >
+                                                <div className="calendar-day__header">
+                                                    <span>{cell.date.getDate()}</span>
+                                                    {!cell.isPast && (
+                                                        <span className="calendar-day__plus">
+                                                            +
                                                         </span>
                                                     )}
-                                                </button>
-                                            ))}
-
-                                            {dayItems.length > 3 && (
-                                                <button
-                                                    type="button"
-                                                    className="calendar-day__more"
-                                                    onClick={(event) => {
-                                                        event.stopPropagation();
-                                                        openEditModal(dayItems[3]);
-                                                    }}
-                                                >
-                                                    +{dayItems.length - 3} more
-                                                </button>
-                                            )}
-                                        </div>
+                                                </div>
+                                            </div>
+                                        ))}
                                     </div>
-                                );
-                            })}
+
+                                    <div className="calendar-week-items">
+                                        {week.segments.map((segment) => (
+                                            <button
+                                                type="button"
+                                                key={`${segment.item.id}-${week.key}`}
+                                                className={[
+                                                    "calendar-item",
+                                                    "calendar-item--range",
+                                                    `calendar-item--${segment.item.itemType}`,
+                                                    segment.continuesBefore
+                                                        ? "calendar-item--continues-before"
+                                                        : "",
+                                                    segment.continuesAfter
+                                                        ? "calendar-item--continues-after"
+                                                        : "",
+                                                ]
+                                                    .filter(Boolean)
+                                                    .join(" ")}
+                                                style={{
+                                                    gridColumn: `${segment.startColumn} / ${segment.endColumn}`,
+                                                    gridRow: segment.lane + 1,
+                                                }}
+                                                onClick={(event) => {
+                                                    event.stopPropagation();
+                                                    openEditModal(segment.item);
+                                                }}
+                                                title={segment.item.title}
+                                            >
+                                                {!segment.continuesBefore && (
+                                                    <span className="calendar-item__time">
+                                                        {itemTimeLabel(segment.item)}
+                                                    </span>
+                                                )}
+                                                <span className="calendar-item__title">
+                                                    {segment.item.title}
+                                                </span>
+                                                {segment.item.taggedUserIds?.length >
+                                                    0 && (
+                                                    <span
+                                                        className="calendar-item__tag"
+                                                        aria-label="Tagged users"
+                                                    >
+                                                        @
+                                                    </span>
+                                                )}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            ))}
                         </div>
                     </article>
 
@@ -1307,71 +1474,180 @@ async function handleConnectTelegram() {
                                 />
                             </label>
 
-                            <div className="calendar-form__row">
-                                <label className="calendar-field">
-                                    <span>Date</span>
-                                    <input
-                                        type="date"
-                                        value={form.date}
-                                        min={editingItem ? undefined : todayDateKey()}
-                                        onChange={(event) =>
-                                            updateForm("date", event.target.value)
-                                        }
-                                    />
-                                </label>
+                            <div className="calendar-schedule-section">
+                                <div className="calendar-schedule-section__header">
+                                    <strong>
+                                        {form.itemType === "event"
+                                            ? "Event duration"
+                                            : form.itemType === "task"
+                                              ? "Task timeline"
+                                              : "Reminder time"}
+                                    </strong>
 
-                                <label className="calendar-check-field">
-                                    <input
-                                        type="checkbox"
-                                        checked={form.allDay}
-                                        onChange={(event) =>
-                                            updateForm(
-                                                "allDay",
-                                                event.target.checked,
-                                            )
-                                        }
-                                    />
-                                    <span>All day</span>
-                                </label>
-                            </div>
-
-                            {!form.allDay && (
-                                <div className="calendar-form__row">
-                                    <label className="calendar-field">
-                                        <span>
-                                            {form.itemType === "event"
-                                                ? "Starts"
-                                                : "Due time"}
-                                        </span>
+                                    <label className="calendar-check-field">
                                         <input
-                                            type="time"
-                                            value={form.startTime}
+                                            type="checkbox"
+                                            checked={form.allDay}
                                             onChange={(event) =>
                                                 updateForm(
-                                                    "startTime",
-                                                    event.target.value,
+                                                    "allDay",
+                                                    event.target.checked,
                                                 )
                                             }
                                         />
+                                        <span>All day</span>
                                     </label>
+                                </div>
 
-                                    {form.itemType === "event" && (
+                                {form.itemType === "event" && (
+                                    <>
+                                        <div className="calendar-form__row">
+                                            <label className="calendar-field">
+                                                <span>Start date</span>
+                                                <input
+                                                    type="date"
+                                                    value={form.startDate}
+                                                    min={editingItem ? undefined : todayDateKey()}
+                                                    onChange={(event) => {
+                                                        const value = event.target.value;
+                                                        updateForm("startDate", value);
+                                                        if (!form.endDate || form.endDate < value) {
+                                                            updateForm("endDate", value);
+                                                        }
+                                                    }}
+                                                />
+                                            </label>
+
+                                            <label className="calendar-field">
+                                                <span>End date</span>
+                                                <input
+                                                    type="date"
+                                                    value={form.endDate}
+                                                    min={form.startDate || todayDateKey()}
+                                                    onChange={(event) =>
+                                                        updateForm("endDate", event.target.value)
+                                                    }
+                                                />
+                                            </label>
+                                        </div>
+
+                                        {!form.allDay && (
+                                            <div className="calendar-form__row">
+                                                <label className="calendar-field">
+                                                    <span>Start time</span>
+                                                    <input
+                                                        type="time"
+                                                        value={form.startTime}
+                                                        onChange={(event) =>
+                                                            updateForm("startTime", event.target.value)
+                                                        }
+                                                    />
+                                                </label>
+
+                                                <label className="calendar-field">
+                                                    <span>End time</span>
+                                                    <input
+                                                        type="time"
+                                                        value={form.endTime}
+                                                        onChange={(event) =>
+                                                            updateForm("endTime", event.target.value)
+                                                        }
+                                                    />
+                                                </label>
+                                            </div>
+                                        )}
+                                    </>
+                                )}
+
+                                {form.itemType === "task" && (
+                                    <>
+                                        <div className="calendar-form__row">
+                                            <label className="calendar-field">
+                                                <span>Start date</span>
+                                                <input
+                                                    type="date"
+                                                    value={form.startDate}
+                                                    min={editingItem ? undefined : todayDateKey()}
+                                                    onChange={(event) => {
+                                                        const value = event.target.value;
+                                                        updateForm("startDate", value);
+                                                        if (!form.dueDate || form.dueDate < value) {
+                                                            updateForm("dueDate", value);
+                                                        }
+                                                    }}
+                                                />
+                                            </label>
+
+                                            <label className="calendar-field">
+                                                <span>Deadline date</span>
+                                                <input
+                                                    type="date"
+                                                    value={form.dueDate}
+                                                    min={form.startDate || todayDateKey()}
+                                                    onChange={(event) =>
+                                                        updateForm("dueDate", event.target.value)
+                                                    }
+                                                />
+                                            </label>
+                                        </div>
+
+                                        {!form.allDay && (
+                                            <div className="calendar-form__row">
+                                                <label className="calendar-field">
+                                                    <span>Start time</span>
+                                                    <input
+                                                        type="time"
+                                                        value={form.startTime}
+                                                        onChange={(event) =>
+                                                            updateForm("startTime", event.target.value)
+                                                        }
+                                                    />
+                                                </label>
+
+                                                <label className="calendar-field">
+                                                    <span>Deadline time</span>
+                                                    <input
+                                                        type="time"
+                                                        value={form.dueTime}
+                                                        onChange={(event) =>
+                                                            updateForm("dueTime", event.target.value)
+                                                        }
+                                                    />
+                                                </label>
+                                            </div>
+                                        )}
+                                    </>
+                                )}
+
+                                {form.itemType === "reminder" && (
+                                    <div className="calendar-form__row">
                                         <label className="calendar-field">
-                                            <span>Ends</span>
+                                            <span>Reminder date</span>
                                             <input
-                                                type="time"
-                                                value={form.endTime}
+                                                type="date"
+                                                value={form.dueDate}
+                                                min={editingItem ? undefined : todayDateKey()}
                                                 onChange={(event) =>
-                                                    updateForm(
-                                                        "endTime",
-                                                        event.target.value,
-                                                    )
+                                                    updateForm("dueDate", event.target.value)
                                                 }
                                             />
                                         </label>
-                                    )}
-                                </div>
-                            )}
+
+                                        {!form.allDay && (
+                                            <label className="calendar-field">
+                                                <span>Reminder time</span>
+                                                <input
+                                                    type="time"
+                                                    value={form.dueTime}
+                                                    onChange={(event) =>
+                                                        updateForm("dueTime", event.target.value)
+                                                    }
+                                                />
+                                            </label>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
 
                             <div className="calendar-form__row">
                                 <label className="calendar-field">
