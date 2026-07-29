@@ -144,11 +144,18 @@ TELEGRAM_API_BASE_URL = (
 TELEGRAM_LINK_TOKEN_LIFETIME_MINUTES = 15
 TELEGRAM_REMINDER_DAYS_AHEAD = 7
 TELEGRAM_REQUEST_TIMEOUT_SECONDS = 15
+TELEGRAM_NEWS_MAX_EVENTS = int(
+    os.getenv("TELEGRAM_NEWS_MAX_EVENTS", "10")
+)
 
+TELEGRAM_NEWS_SUMMARY_MAX_ARTICLES = int(
+    os.getenv("TELEGRAM_NEWS_SUMMARY_MAX_ARTICLES", "30")
+)
 
 # ---------------------------------------------------------------------------
 # Firebase Admin and Firestore
 # ---------------------------------------------------------------------------
+
 
 def _resolve_credentials_path(raw_path: str) -> Path | None:
     value = raw_path.strip()
@@ -818,6 +825,138 @@ def _resolve_tagged_users(
 # ---------------------------------------------------------------------------
 # Telegram helpers
 # ---------------------------------------------------------------------------
+
+def _build_telegram_news_message(
+    summary: dict[str, Any],
+    scope: str,
+) -> str:
+    scope_name = (
+        "Singapore"
+        if scope == "singapore"
+        else "Global"
+    )
+
+    scope_icon = (
+        "🇸🇬"
+        if scope == "singapore"
+        else "🌍"
+    )
+
+    headline = escape(
+        str(
+            summary.get("headline")
+            or f"{scope_name} News Summary"
+        )
+    )
+
+    overview = escape(
+        str(summary.get("overview") or "").strip()
+    )
+
+    events = summary.get("events")
+    if not isinstance(events, list):
+        events = []
+
+    lines = [
+        f"{scope_icon} <b>{scope_name} News Summary</b>",
+        "",
+        f"<b>{headline}</b>",
+    ]
+
+    if overview:
+        lines.extend([
+            "",
+            overview,
+        ])
+
+    selected_events = events[:TELEGRAM_NEWS_MAX_EVENTS]
+
+    if selected_events:
+        lines.extend([
+            "",
+            "<b>Key stories</b>",
+            "",
+        ])
+
+    for index, event in enumerate(selected_events, start=1):
+        if not isinstance(event, dict):
+            continue
+
+        title = escape(
+            str(
+                event.get("title")
+                or "Untitled story"
+            ).strip()
+        )
+
+        event_summary = escape(
+            str(event.get("summary") or "").strip()
+        )
+
+        importance = escape(
+            str(event.get("importance") or "").strip()
+        )
+
+        lines.append(
+            f"<b>{index}. {title}</b>"
+        )
+
+        if event_summary:
+            lines.append(event_summary)
+
+        if importance:
+            lines.append(
+                f"<i>Why it matters:</i> {importance}"
+            )
+
+        sources = event.get("sources")
+        if isinstance(sources, list) and sources:
+            first_source = sources[0]
+
+            if isinstance(first_source, dict):
+                source_name = escape(
+                    str(
+                        first_source.get("name")
+                        or "Read article"
+                    ).strip()
+                )
+
+                source_url = str(
+                    first_source.get("url") or ""
+                ).strip()
+
+                if source_url.startswith(
+                    ("https://", "http://")
+                ):
+                    safe_url = escape(
+                        source_url,
+                        quote=True,
+                    )
+                    lines.append(
+                        f'<a href="{safe_url}">{source_name}</a>'
+                    )
+
+        lines.append("")
+
+    lines.extend([
+        "Generated from articles published during the past 24 hours.",
+        "",
+        "Open The Nowl In One to view all article TLDRs.",
+        "",
+        "Use /unsubscribe to stop Telegram updates.",
+    ])
+
+    message = "\n".join(lines).strip()
+
+    # Telegram sendMessage allows roughly 4096 characters.
+    if len(message) > 4000:
+        message = (
+            message[:3900].rstrip()
+            + "\n\nOpen The Nowl In One for the remaining stories."
+        )
+
+    return message
+
 
 def _require_telegram_configuration():
     missing: list[str] = []
@@ -1645,41 +1784,6 @@ def _build_leaderboard() -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
-
-@app.route("/api/internal/send-daily-reminders", methods=["POST", "GET"])
-def send_daily_reminders():
-    supplied_secret = request.headers.get("X-Cron-Secret")
-
-    # Also allow the secret as a query parameter if your scheduler
-    # cannot configure custom request headers.
-    if not supplied_secret:
-        supplied_secret = request.args.get("secret")
-
-    if not CRON_SECRET or supplied_secret != CRON_SECRET:
-        return jsonify({"error": "Unauthorized"}), 401
-
-    singapore_now = datetime.now(ZoneInfo("Asia/Singapore"))
-
-    try:
-        # Replace this with your existing Telegram/email reminder function.
-        result = process_due_reminders(
-            reminder_date=singapore_now.date()
-        )
-
-        return jsonify({
-            "success": True,
-            "processed_at": singapore_now.isoformat(),
-            "result": result,
-        }), 200
-
-    except Exception as error:
-        app.logger.exception("Daily reminder job failed")
-
-        return jsonify({
-            "success": False,
-            "error": str(error),
-        }), 500
-
 
 @app.get("/health")
 def health_check():
@@ -6714,6 +6818,198 @@ def send_daily_telegram_reminders():
             "failures": failures,
         }
     )
+
+
+@app.post("/api/internal/telegram/send-daily-news")
+def send_daily_telegram_news():
+    firestore_error = _require_firestore()
+    if firestore_error:
+        return firestore_error
+
+    telegram_error = _require_telegram_configuration()
+    if telegram_error:
+        return telegram_error
+
+    huggingface_error = _require_huggingface_configuration()
+    if huggingface_error:
+        return huggingface_error
+
+    if not _verify_cron_secret():
+        return jsonify(
+            {"error": "Invalid cron secret"}
+        ), 403
+
+    today_key = datetime.now(
+        SINGAPORE_TZ
+    ).date().isoformat()
+
+    # Generate only once, regardless of subscriber count.
+    try:
+        singapore_summary = (
+            _generate_scheduled_news_summary(
+                "singapore"
+            )
+        )
+
+        global_summary = (
+            _generate_scheduled_news_summary(
+                "global"
+            )
+        )
+
+        singapore_message = (
+            _build_telegram_news_message(
+                singapore_summary,
+                "singapore",
+            )
+        )
+
+        global_message = (
+            _build_telegram_news_message(
+                global_summary,
+                "global",
+            )
+        )
+
+    except requests.Timeout:
+        app.logger.exception(
+            "Scheduled news summary timed out"
+        )
+        return jsonify({
+            "error": (
+                "The scheduled news summary took too long "
+                "to generate"
+            )
+        }), 504
+
+    except Exception as summary_error:
+        app.logger.exception(
+            "Could not generate scheduled news summaries: %s",
+            summary_error,
+        )
+        return jsonify({
+            "error": (
+                "Could not generate scheduled news summaries"
+            ),
+            "details": str(summary_error)[:300],
+        }), 502
+
+    sent_count = 0
+    failed_count = 0
+    skipped_count = 0
+    failures: list[dict[str, str]] = []
+
+    snapshots = (
+        FIRESTORE_DB
+        .collection("telegramSubscriptions")
+        .where("active", "==", True)
+        .stream()
+    )
+
+    for snapshot in snapshots:
+        uid = snapshot.id
+        subscription = snapshot.to_dict() or {}
+
+        chat_id = str(
+            subscription.get("chatId") or ""
+        ).strip()
+
+        if not chat_id:
+            skipped_count += 1
+            continue
+
+        # Prevent duplicate news digests on the same date.
+        if (
+            subscription.get(
+                "lastNewsSummarySentDate"
+            )
+            == today_key
+        ):
+            skipped_count += 1
+            continue
+
+        try:
+            _send_telegram_message(
+                chat_id,
+                singapore_message,
+            )
+
+            _send_telegram_message(
+                chat_id,
+                global_message,
+            )
+
+            _write_document(
+                "telegramSubscriptions",
+                uid,
+                {
+                    "lastNewsSummarySentAt": _now_iso(),
+                    "lastNewsSummarySentDate": today_key,
+                    "lastNewsSummaryStatus": "sent",
+                    "lastNewsSummarySingaporeEventCount": len(
+                        singapore_summary.get(
+                            "events",
+                            [],
+                        )
+                    ),
+                    "lastNewsSummaryGlobalEventCount": len(
+                        global_summary.get(
+                            "events",
+                            [],
+                        )
+                    ),
+                    "updatedAt": _now_iso(),
+                },
+                merge=True,
+            )
+
+            sent_count += 1
+
+        except Exception as delivery_error:
+            failed_count += 1
+            error_message = str(
+                delivery_error
+            )[:300]
+
+            failures.append({
+                "uid": uid,
+                "error": error_message,
+            })
+
+            _write_document(
+                "telegramSubscriptions",
+                uid,
+                {
+                    "lastNewsSummaryStatus": "failed",
+                    "lastNewsSummaryError": error_message,
+                    "lastNewsSummaryAttemptAt": _now_iso(),
+                    "updatedAt": _now_iso(),
+                },
+                merge=True,
+            )
+
+            app.logger.exception(
+                "News summary delivery failed for user %s: %s",
+                uid,
+                delivery_error,
+            )
+
+    return jsonify({
+        "message": (
+            "Daily Telegram news summary run completed"
+        ),
+        "date": today_key,
+        "sent": sent_count,
+        "failed": failed_count,
+        "skipped": skipped_count,
+        "singaporeEventCount": len(
+            singapore_summary.get("events", [])
+        ),
+        "globalEventCount": len(
+            global_summary.get("events", [])
+        ),
+        "failures": failures,
+    }), 200
 
 
 @app.get("/api/games/wordle/me")
