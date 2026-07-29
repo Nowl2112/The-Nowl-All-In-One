@@ -3098,7 +3098,7 @@ NEWS_SUMMARY_BATCH_SIZE = max(
     min(int(os.getenv("NEWS_SUMMARY_BATCH_SIZE", "6")), 10),
 )
 NEWS_SUMMARY_MAX_OUTPUT_TOKENS = int(
-    os.getenv("NEWS_SUMMARY_MAX_OUTPUT_TOKENS", "1800")
+    os.getenv("NEWS_SUMMARY_MAX_OUTPUT_TOKENS", "3000")
 )
 
 # Words that usually indicate an article has broad public importance.
