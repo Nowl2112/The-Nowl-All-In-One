@@ -7,7 +7,7 @@ import LoginPage from "../pages/login/login.jsx";
 import WordleRanked from "../pages/wordle/wordleRanked.jsx";
 import ResetPasswordPage from "../pages/resetPassword/resetPassword.jsx";
 import CalendarPage from "../pages/calendar/calendar.jsx";
-import TaskBoardPage from "../pages/taskBoard/TaskBoard.jsx";
+import TaskBoardPage from "../pages/taskboard/taskboard.jsx";
 
 function AppRoutes() {
     return (
