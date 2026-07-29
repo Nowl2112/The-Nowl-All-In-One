@@ -4034,6 +4034,62 @@ Articles:
 """.strip()
 
 
+def _generate_scheduled_news_summary(
+    scope: str,
+) -> dict[str, Any]:
+    if scope not in {"singapore", "global"}:
+        raise ValueError(
+            "scope must be singapore or global"
+        )
+
+    feed_region = (
+        "singapore"
+        if scope == "singapore"
+        else "world"
+    )
+
+    articles = _deduplicate_news_articles(
+        _fetch_cna_feed(feed_region)
+    )
+
+    recent_articles = _articles_from_last_hours(
+        articles,
+        NEWS_SUMMARY_WINDOW_HOURS,
+    )
+
+    # For Telegram, use the highest-impact recent articles.
+    selected_articles = _sort_news_articles(
+        recent_articles,
+        "importance",
+    )[:TELEGRAM_NEWS_SUMMARY_MAX_ARTICLES]
+
+    if not selected_articles:
+        return {
+            "headline": (
+                f"No major {scope} news articles were "
+                "available from the past 24 hours."
+            ),
+            "overview": (
+                "No eligible articles were found in the current news feed."
+            ),
+            "events": [],
+            "developingStories": [],
+        }
+
+    ai_articles = _prepare_articles_for_ai(
+        selected_articles
+    )
+
+    # Use your combined-event summary function, rather than producing
+    # one Telegram entry for every article.
+    summary, _usage = _call_news_summary_model(
+        ai_articles,
+        scope,
+    )
+
+    return summary
+
+
 def _extract_ai_message_content(
     response_payload: dict[str, Any],
 ) -> str:
