@@ -1027,3 +1027,58 @@ button, input, textarea, select { font: inherit; }
     .task-board-modal > footer { flex-wrap: wrap; }
     .task-board-modal > footer .task-board-button { flex: 1; }
 }
+
+.task-board-member-fieldset {
+    display: grid;
+    gap: 10px;
+}
+
+.task-board-member-fieldset > small {
+    color: var(--nowl-muted);
+    font-size: 11px;
+    line-height: 1.45;
+}
+
+.task-board-user-results,
+.task-board-selected-members,
+.task-board-member-list {
+    display: grid;
+    gap: 8px;
+    max-height: 260px;
+    overflow-y: auto;
+}
+
+.task-board-user-results > button,
+.task-board-selected-members > div,
+.task-board-member-list > div {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 9px 10px;
+    border: 1px solid #d9d2c9;
+    border-radius: 13px;
+    background: #fff;
+    color: inherit;
+    text-align: left;
+}
+
+.task-board-user-results > button { cursor: pointer; }
+.task-board-user-results > button:hover,
+.task-board-user-results > button.is-selected { background: var(--nowl-surface-soft); border-color: #b9d8eb; }
+.task-board-user-results > button > span:nth-child(2),
+.task-board-member-name { min-width: 0; flex: 1; font-weight: 850; }
+.task-board-user-results small,
+.task-board-member-name small { display: block; margin-top: 2px; color: var(--nowl-muted); font-size: 10px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.task-board-user-results strong { margin-left: auto; color: var(--nowl-blue-dark); font-size: 12px; }
+.task-board-selected-members select,
+.task-board-member-list select { width: auto; min-width: 100px; }
+.task-board-selected-members > div > button { border: 0; background: transparent; cursor: pointer; font-size: 20px; }
+.task-board-member-remove { padding: 8px 10px; border: 1px solid #efb9b3; border-radius: 10px; background: #fff0ed; color: #9d3e35; cursor: pointer; font-weight: 850; }
+
+@media (max-width: 600px) {
+    .task-board-selected-members > div,
+    .task-board-member-list > div { flex-wrap: wrap; }
+    .task-board-selected-members select,
+    .task-board-member-list select { margin-left: 46px; flex: 1; }
+}

@@ -107,7 +107,6 @@ function HomePage() {
     const [taskBoardsError, setTaskBoardsError] = useState("");
 
     const [activeToolIndex, setActiveToolIndex] = useState(0);
-    const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
     const usefulTools = useMemo(
         () => [
@@ -470,67 +469,7 @@ function HomePage() {
 
     return (
         <main className="home-page">
-            <aside
-                className={`home-sidebar ${isSidebarCollapsed ? "home-sidebar--collapsed" : ""}`}
-                aria-label="Main navigation"
-            >
-                <div className="home-sidebar__topbar">
-                    <button
-                        type="button"
-                        className="home-sidebar__brand"
-                        onClick={() => navigate("/")}
-                        aria-label="Go to homepage"
-                    >
-                        <img src={kotaroImage} alt="" />
-                        <span className="home-sidebar__label">The Nowl</span>
-                    </button>
-
-                    <button
-                        type="button"
-                        className="home-sidebar__toggle"
-                        onClick={() => setIsSidebarCollapsed((current) => !current)}
-                        aria-label={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-                        aria-expanded={!isSidebarCollapsed}
-                    >
-                        <span aria-hidden="true">{isSidebarCollapsed ? "›" : "‹"}</span>
-                    </button>
-                </div>
-
-                <nav className="home-sidebar__nav">
-                    <a href="#overview" title="Overview">
-                        <span className="home-sidebar__icon" aria-hidden="true">⌂</span>
-                        <span className="home-sidebar__label">Overview</span>
-                    </a>
-                    <a href="#useful-tools" title="Useful tools">
-                        <span className="home-sidebar__icon" aria-hidden="true">▦</span>
-                        <span className="home-sidebar__label">Useful tools</span>
-                    </a>
-                    <a href="#games" title="Games">
-                        <span className="home-sidebar__icon" aria-hidden="true">◆</span>
-                        <span className="home-sidebar__label">Games</span>
-                    </a>
-                    <a href="#leaderboard" title="Leaderboard">
-                        <span className="home-sidebar__icon" aria-hidden="true">★</span>
-                        <span className="home-sidebar__label">Leaderboard</span>
-                    </a>
-                </nav>
-
-                <div className="home-sidebar__quick-links">
-                    <p className="home-sidebar__label">Quick access</p>
-                    <button type="button" onClick={() => navigate("/calendar")} title="Calendar">
-                        <span className="home-sidebar__icon" aria-hidden="true">▣</span>
-                        <span className="home-sidebar__label">Calendar</span>
-                        <span className="home-sidebar__label" aria-hidden="true">→</span>
-                    </button>
-                    <button type="button" onClick={() => navigate("/task-boards")} title="Task boards">
-                        <span className="home-sidebar__icon" aria-hidden="true">☷</span>
-                        <span className="home-sidebar__label">Task boards</span>
-                        <span className="home-sidebar__label" aria-hidden="true">→</span>
-                    </button>
-                </div>
-            </aside>
-
-            <div className={`home-shell ${isSidebarCollapsed ? "home-shell--sidebar-collapsed" : ""}`} id="overview">
+            <div className="home-shell" id="overview">
                 <header className="home-nav">
                     <button
                         type="button"

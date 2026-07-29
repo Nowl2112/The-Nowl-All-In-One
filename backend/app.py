@@ -3173,6 +3173,42 @@ def _resolve_board_assignees(assignee_ids: list[str], board: dict[str, Any]):
     return valid_ids, assignees, invalid_ids
 
 
+def _resolve_initial_board_members(value: Any, owner_uid: str):
+    if value in (None, ""):
+        return {}, None
+    if not isinstance(value, list):
+        return {}, "members must be an array"
+    if len(value) > 50:
+        return {}, "A board can have at most 50 members"
+
+    members = {}
+    for raw_member in value:
+        if not isinstance(raw_member, dict):
+            return {}, "Each member must be an object"
+        uid = str(raw_member.get("uid") or "").strip()
+        role = str(raw_member.get("role") or "editor").strip().lower()
+        if not uid:
+            return {}, "Every member must include a uid"
+        if uid == owner_uid:
+            continue
+        if role not in TASK_BOARD_MEMBER_ROLES:
+            return {}, "Member role must be viewer or editor"
+        user = _read_document("users", uid)
+        if not user:
+            return {}, f"User {uid} was not found"
+        now = _now_iso()
+        members[uid] = {
+            "uid": uid,
+            "role": role,
+            "displayName": str(user.get("displayName") or "User").strip(),
+            "email": _normalize_email(user.get("email")),
+            "profilePicLink": _profile_picture_link(user),
+            "addedAt": now,
+            "updatedAt": now,
+        }
+    return members, None
+
+
 def _normalize_board_checklist(value: Any):
     if value in (None, ""):
         return [], None
@@ -3238,6 +3274,11 @@ def create_task_board():
     columns, columns_error = _normalize_board_columns(payload.get("columns"))
     if columns_error:
         return jsonify({"error": columns_error}), 400
+    members, members_error = _resolve_initial_board_members(
+        payload.get("members"), identity["uid"]
+    )
+    if members_error:
+        return jsonify({"error": members_error}), 400
     now = _now_iso()
     board_ref = FIRESTORE_DB.collection("taskBoards").document()
     board = {
@@ -3246,7 +3287,7 @@ def create_task_board():
         "ownerId": identity["uid"],
         "ownerDisplayName": str(user.get("displayName") or identity["name"] or "User").strip(),
         "ownerProfilePicLink": _profile_picture_link(user),
-        "members": {},
+        "members": members,
         "columns": columns,
         "createdAt": now,
         "updatedAt": now,

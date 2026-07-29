@@ -12,6 +12,7 @@ const API_BASE_URL =
 const EMPTY_BOARD_FORM = {
     name: "",
     description: "",
+    members: [],
 };
 
 const EMPTY_CARD_FORM = {
@@ -118,6 +119,10 @@ function TaskBoardPage() {
 
     const [boardModalOpen, setBoardModalOpen] = useState(false);
     const [boardForm, setBoardForm] = useState(EMPTY_BOARD_FORM);
+    const [memberModalOpen, setMemberModalOpen] = useState(false);
+    const [memberSearch, setMemberSearch] = useState("");
+    const [memberSearchResults, setMemberSearchResults] = useState([]);
+    const [memberSearchStatus, setMemberSearchStatus] = useState("idle");
 
     const [cardModalOpen, setCardModalOpen] = useState(false);
     const [editingCard, setEditingCard] = useState(null);
@@ -262,6 +267,31 @@ function TaskBoardPage() {
         return () => window.clearTimeout(timer);
     }, [notice]);
 
+    useEffect(() => {
+        const query = memberSearch.trim();
+        if (query.length < 2) {
+            setMemberSearchResults([]);
+            setMemberSearchStatus("idle");
+            return undefined;
+        }
+
+        const timer = window.setTimeout(() => {
+            setMemberSearchStatus("loading");
+            apiRequest(`/api/users/search?q=${encodeURIComponent(query)}&limit=12`)
+                .then((data) => {
+                    setMemberSearchResults(Array.isArray(data.users) ? data.users : []);
+                    setMemberSearchStatus("success");
+                })
+                .catch((error) => {
+                    console.error("Unable to search users:", error);
+                    setMemberSearchResults([]);
+                    setMemberSearchStatus("error");
+                });
+        }, 300);
+
+        return () => window.clearTimeout(timer);
+    }, [memberSearch, apiRequest]);
+
     const canEdit = activeBoard?.currentUserRole === "owner" ||
         activeBoard?.currentUserRole === "editor";
     const isOwner = activeBoard?.currentUserRole === "owner";
@@ -324,6 +354,70 @@ function TaskBoardPage() {
         setCardModalOpen(true);
     }
 
+    function togglePendingBoardMember(user) {
+        setBoardForm((current) => {
+            const exists = current.members.some((member) => member.uid === user.uid);
+            return {
+                ...current,
+                members: exists
+                    ? current.members.filter((member) => member.uid !== user.uid)
+                    : [...current.members, { ...user, role: "editor" }],
+            };
+        });
+    }
+
+    function updatePendingBoardMemberRole(uid, role) {
+        setBoardForm((current) => ({
+            ...current,
+            members: current.members.map((member) =>
+                member.uid === uid ? { ...member, role } : member,
+            ),
+        }));
+    }
+
+    async function handleAddExistingBoardMember(user, role = "editor") {
+        if (!activeBoard || !isOwner) return;
+        setSaving(true);
+        setPageError("");
+        try {
+            await apiRequest(`/api/task-boards/${activeBoard.id}/members`, {
+                method: "POST",
+                body: JSON.stringify({ uid: user.uid, role }),
+            });
+            await loadBoard(activeBoard.id);
+            await loadBoards();
+            setNotice(`${user.displayName} added to the board.`);
+        } catch (error) {
+            setPageError(error.message);
+        } finally {
+            setSaving(false);
+        }
+    }
+
+    async function handleChangeMemberRole(member, role) {
+        if (!activeBoard || !isOwner) return;
+        await handleAddExistingBoardMember(member, role);
+    }
+
+    async function handleRemoveBoardMember(member) {
+        if (!activeBoard || !isOwner) return;
+        if (!window.confirm(`Remove ${member.displayName} from this board?`)) return;
+        setSaving(true);
+        setPageError("");
+        try {
+            await apiRequest(`/api/task-boards/${activeBoard.id}/members/${member.uid}`, {
+                method: "DELETE",
+            });
+            await loadBoard(activeBoard.id);
+            await loadBoards();
+            setNotice(`${member.displayName} removed from the board.`);
+        } catch (error) {
+            setPageError(error.message);
+        } finally {
+            setSaving(false);
+        }
+    }
+
     async function handleCreateBoard(event) {
         event.preventDefault();
         setSaving(true);
@@ -332,7 +426,11 @@ function TaskBoardPage() {
         try {
             const data = await apiRequest("/api/task-boards", {
                 method: "POST",
-                body: JSON.stringify(boardForm),
+                body: JSON.stringify({
+                    name: boardForm.name,
+                    description: boardForm.description,
+                    members: boardForm.members.map(({ uid, role }) => ({ uid, role })),
+                }),
             });
 
             const board = data.board;
@@ -717,7 +815,7 @@ function TaskBoardPage() {
                         onClick={() => navigate("/")}
                     >
                         <img src={kotaroImage} alt="" />
-                        <span className="task-board-sidebar__label">The Nowl</span>
+                        <span className="task-board-sidebar__label">The Nowl In One</span>
                     </button>
                     <button
                         type="button"
@@ -738,25 +836,11 @@ function TaskBoardPage() {
                     aria-expanded={isMobileBoardMenuOpen}
                     aria-controls="task-board-mobile-menu"
                 >
-                    <span aria-hidden="true">▦</span>
                     <span>{activeBoard?.name || "Select board"}</span>
                     <span aria-hidden="true">{isMobileBoardMenuOpen ? "⌃" : "⌄"}</span>
                 </button>
 
-                <nav className="task-board-sidebar__nav">
-                    <button type="button" onClick={() => navigate("/")}>
-                        <span aria-hidden="true">⌂</span>
-                        <span className="task-board-sidebar__label">Homepage</span>
-                    </button>
-                    <button type="button" onClick={() => navigate("/calendar")}>
-                        <span aria-hidden="true">▣</span>
-                        <span className="task-board-sidebar__label">Calendar</span>
-                    </button>
-                    <button type="button" className="is-active">
-                        <span aria-hidden="true">☷</span>
-                        <span className="task-board-sidebar__label">Task boards</span>
-                    </button>
-                </nav>
+            
 
                 <div
                     id="task-board-mobile-menu"
@@ -906,13 +990,25 @@ function TaskBoardPage() {
                                     {activeBoard.currentUserRole}
                                 </span>
                                 {isOwner && (
-                                    <button
-                                        type="button"
-                                        className="task-board-button task-board-button--ghost"
-                                        onClick={() => setColumnModalOpen(true)}
-                                    >
-                                        + Add column
-                                    </button>
+                                    <>
+                                        <button
+                                            type="button"
+                                            className="task-board-button task-board-button--ghost"
+                                            onClick={() => {
+                                                setMemberSearch("");
+                                                setMemberModalOpen(true);
+                                            }}
+                                        >
+                                            Manage members
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="task-board-button task-board-button--ghost"
+                                            onClick={() => setColumnModalOpen(true)}
+                                        >
+                                            + Add column
+                                        </button>
+                                    </>
                                 )}
                             </div>
                         </section>
@@ -1283,6 +1379,51 @@ function TaskBoardPage() {
                             />
                         </label>
 
+                        <fieldset className="task-board-member-fieldset">
+                            <legend>Add members</legend>
+                            <input
+                                type="search"
+                                value={memberSearch}
+                                onChange={(event) => setMemberSearch(event.target.value)}
+                                placeholder="Search by name or email"
+                            />
+                            <small>Members can be added now or later. Editors can change cards; viewers can only view.</small>
+
+                            {boardForm.members.length > 0 && (
+                                <div className="task-board-selected-members">
+                                    {boardForm.members.map((member) => (
+                                        <div key={member.uid}>
+                                            <span className="task-board-avatar">
+                                                {member.profilePicLink ? <img src={member.profilePicLink} alt="" /> : avatarText(member.displayName)}
+                                            </span>
+                                            <span className="task-board-member-name">{member.displayName}<small>{member.email}</small></span>
+                                            <select value={member.role} onChange={(event) => updatePendingBoardMemberRole(member.uid, event.target.value)}>
+                                                <option value="editor">Editor</option>
+                                                <option value="viewer">Viewer</option>
+                                            </select>
+                                            <button type="button" onClick={() => togglePendingBoardMember(member)} aria-label={`Remove ${member.displayName}`}>×</button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            <div className="task-board-user-results">
+                                {memberSearchStatus === "loading" && <p>Searching…</p>}
+                                {memberSearchStatus === "success" && memberSearchResults.map((user) => {
+                                    const selected = boardForm.members.some((member) => member.uid === user.uid);
+                                    return (
+                                        <button type="button" key={user.uid} className={selected ? "is-selected" : ""} onClick={() => togglePendingBoardMember(user)}>
+                                            <span className="task-board-avatar">
+                                                {user.profilePicLink ? <img src={user.profilePicLink} alt="" /> : avatarText(user.displayName)}
+                                            </span>
+                                            <span>{user.displayName}<small>{user.email}</small></span>
+                                            <strong>{selected ? "Added" : "Add"}</strong>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </fieldset>
+
                         <footer>
                             <button
                                 type="button"
@@ -1299,6 +1440,62 @@ function TaskBoardPage() {
                             </button>
                         </footer>
                     </form>
+                </div>
+            )}
+
+            {memberModalOpen && activeBoard && (
+                <div className="task-board-modal-backdrop">
+                    <div className="task-board-modal task-board-modal--wide">
+                        <header>
+                            <div>
+                                <p className="task-board-eyebrow">Board access</p>
+                                <h2>Manage members</h2>
+                            </div>
+                            <button type="button" onClick={() => setMemberModalOpen(false)}>×</button>
+                        </header>
+
+                        <label>
+                            Add someone
+                            <input type="search" value={memberSearch} onChange={(event) => setMemberSearch(event.target.value)} placeholder="Search by name or email" />
+                        </label>
+
+                        <div className="task-board-user-results">
+                            {memberSearchStatus === "loading" && <p>Searching…</p>}
+                            {memberSearchStatus === "success" && memberSearchResults
+                                .filter((user) => !boardMembers.some((member) => member.uid === user.uid))
+                                .map((user) => (
+                                    <button type="button" key={user.uid} onClick={() => handleAddExistingBoardMember(user)} disabled={saving}>
+                                        <span className="task-board-avatar">{user.profilePicLink ? <img src={user.profilePicLink} alt="" /> : avatarText(user.displayName)}</span>
+                                        <span>{user.displayName}<small>{user.email}</small></span>
+                                        <strong>Add</strong>
+                                    </button>
+                                ))}
+                        </div>
+
+                        <div className="task-board-member-list">
+                            {boardMembers.map((member) => (
+                                <div key={member.uid}>
+                                    <span className="task-board-avatar">{member.profilePicLink ? <img src={member.profilePicLink} alt="" /> : avatarText(member.displayName)}</span>
+                                    <span className="task-board-member-name">{member.displayName}<small>{member.role === "owner" ? "Board owner" : member.email}</small></span>
+                                    {member.role === "owner" ? (
+                                        <strong>Owner</strong>
+                                    ) : (
+                                        <>
+                                            <select value={member.role} onChange={(event) => handleChangeMemberRole(member, event.target.value)} disabled={saving}>
+                                                <option value="editor">Editor</option>
+                                                <option value="viewer">Viewer</option>
+                                            </select>
+                                            <button type="button" className="task-board-member-remove" onClick={() => handleRemoveBoardMember(member)} disabled={saving}>Remove</button>
+                                        </>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+
+                        <footer>
+                            <button type="button" className="task-board-button task-board-button--primary" onClick={() => setMemberModalOpen(false)}>Done</button>
+                        </footer>
+                    </div>
                 </div>
             )}
 
