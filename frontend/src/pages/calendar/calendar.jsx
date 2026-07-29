@@ -11,6 +11,7 @@ const API_BASE_URL =
 
 const ITEM_TYPES = ["event", "task", "reminder"];
 const VISIBILITIES = ["personal", "family", "all"];
+const RECURRENCE_FREQUENCIES = ["none", "daily", "weekly", "monthly", "yearly"];
 
 const EMPTY_FORM = {
     itemType: "event",
@@ -26,6 +27,11 @@ const EMPTY_FORM = {
     visibility: "personal",
     taggedUserIds: [],
     status: "pending",
+    recurrenceFrequency: "none",
+    recurrenceInterval: 1,
+    recurrenceEndType: "never",
+    recurrenceEndDate: "",
+    recurrenceCount: 10,
 };
 
 function pad(value) {
@@ -98,6 +104,31 @@ function startOfMonth(date) {
 
 function addMonths(date, amount) {
     return new Date(date.getFullYear(), date.getMonth() + amount, 1);
+}
+
+function addDays(date, amount) {
+    const next = new Date(date);
+    next.setDate(next.getDate() + amount);
+    return next;
+}
+
+function recurrenceLabel(item) {
+    const recurrence = item?.recurrence || {};
+    const frequency = recurrence.frequency || "none";
+    if (frequency === "none") return "";
+
+    const interval = Number(recurrence.interval) || 1;
+    const unit = frequency === "daily"
+        ? "day"
+        : frequency === "weekly"
+          ? "week"
+          : frequency === "monthly"
+            ? "month"
+            : "year";
+
+    return interval === 1
+        ? `Repeats ${frequency}`
+        : `Repeats every ${interval} ${unit}s`;
 }
 
 function formatMonth(date) {
@@ -524,8 +555,15 @@ async function handleConnectTelegram() {
         try {
             const headers = await getAuthHeaders();
 
+            const rangeStart = addDays(startOfMonth(visibleMonth), -7);
+            const rangeEnd = addDays(addMonths(startOfMonth(visibleMonth), 1), 7);
+            const rangeQuery = new URLSearchParams({
+                start: buildIso(localDateKey(rangeStart), "00:00", true),
+                end: buildIso(localDateKey(rangeEnd), "00:00", true),
+            });
+
             const [itemsResponse, upcomingResponse] = await Promise.all([
-                fetch(`${API_BASE_URL}/api/calendar/items`, {
+                fetch(`${API_BASE_URL}/api/calendar/items?${rangeQuery.toString()}`, {
                     method: "GET",
                     headers,
                     cache: "no-store",
@@ -562,7 +600,7 @@ async function handleConnectTelegram() {
             setError(loadError.message || "Could not load the calendar.");
             setStatus("error");
         }
-    }, [currentUser, getAuthHeaders]);
+    }, [currentUser, getAuthHeaders, visibleMonth]);
 
     useEffect(() => {
         loadCalendar();
@@ -665,6 +703,15 @@ async function handleConnectTelegram() {
                 ? item.taggedUserIds
                 : [],
             status: item.status || "pending",
+            recurrenceFrequency: item.recurrence?.frequency || "none",
+            recurrenceInterval: item.recurrence?.interval || 1,
+            recurrenceEndType: item.recurrence?.count
+                ? "count"
+                : item.recurrence?.endAt
+                  ? "date"
+                  : "never",
+            recurrenceEndDate: item.recurrence?.endAt?.slice(0, 10) || "",
+            recurrenceCount: item.recurrence?.count || 10,
         });
         setSelectedUsers(
             Array.isArray(item.taggedUsers) ? item.taggedUsers : [],
@@ -762,6 +809,22 @@ async function handleConnectTelegram() {
     function makePayload() {
         const taggedUserIds = selectedUsers.map((user) => user.uid);
 
+        const recurrence = {
+            frequency: form.recurrenceFrequency,
+            interval: Number(form.recurrenceInterval) || 1,
+            endAt:
+                form.recurrenceFrequency !== "none" &&
+                form.recurrenceEndType === "date" &&
+                form.recurrenceEndDate
+                    ? buildIso(form.recurrenceEndDate, "23:59", false)
+                    : null,
+            count:
+                form.recurrenceFrequency !== "none" &&
+                form.recurrenceEndType === "count"
+                    ? Number(form.recurrenceCount) || 1
+                    : null,
+        };
+
         const payload = {
             itemType: form.itemType,
             title: form.title.trim(),
@@ -769,6 +832,7 @@ async function handleConnectTelegram() {
             visibility: form.visibility,
             taggedUserIds,
             allDay: form.allDay,
+            recurrence,
         };
 
         if (form.itemType === "event") {
@@ -830,6 +894,37 @@ async function handleConnectTelegram() {
 
         const startValue = formStartDateTime(form);
         const endValue = formEndDateTime(form);
+
+        if (form.recurrenceFrequency !== "none") {
+            const interval = Number(form.recurrenceInterval);
+            if (!Number.isInteger(interval) || interval < 1 || interval > 365) {
+                setFormError("Repeat interval must be between 1 and 365.");
+                return;
+            }
+
+            if (form.recurrenceEndType === "date") {
+                if (!form.recurrenceEndDate) {
+                    setFormError("Choose when the recurring series should end.");
+                    return;
+                }
+
+                const firstDate = form.itemType === "reminder"
+                    ? form.dueDate
+                    : form.startDate;
+                if (form.recurrenceEndDate < firstDate) {
+                    setFormError("The repeat end date cannot be before the first item.");
+                    return;
+                }
+            }
+
+            if (form.recurrenceEndType === "count") {
+                const count = Number(form.recurrenceCount);
+                if (!Number.isInteger(count) || count < 1 || count > 1000) {
+                    setFormError("Number of occurrences must be between 1 and 1000.");
+                    return;
+                }
+            }
+        }
 
         if (!editingItem) {
             const firstDate = form.itemType === "reminder"
@@ -901,7 +996,9 @@ async function handleConnectTelegram() {
         }
 
         const confirmed = window.confirm(
-            `Delete "${editingItem.title}"? This cannot be undone.`,
+            editingItem.isRecurringOccurrence
+                ? `Delete the entire recurring series for "${editingItem.title}"? This cannot be undone.`
+                : `Delete "${editingItem.title}"? This cannot be undone.`,
         );
 
         if (!confirmed) {
@@ -1164,6 +1261,15 @@ async function handleConnectTelegram() {
                                                 <span className="calendar-item__title">
                                                     {segment.item.title}
                                                 </span>
+                                                {segment.item.recurrence?.frequency !== "none" && (
+                                                    <span
+                                                        className="calendar-item__repeat"
+                                                        title={recurrenceLabel(segment.item)}
+                                                        aria-label={recurrenceLabel(segment.item)}
+                                                    >
+                                                        ↻
+                                                    </span>
+                                                )}
                                                 {segment.item.taggedUserIds?.length >
                                                     0 && (
                                                     <span
@@ -1233,6 +1339,9 @@ async function handleConnectTelegram() {
                                                 {formatFriendlyDate(
                                                     item.startAt || item.dueAt,
                                                 )}
+                                                {item.recurrence?.frequency !== "none"
+                                                    ? ` · ${recurrenceLabel(item)}`
+                                                    : ""}
                                             </small>
                                         </span>
                                     </button>
@@ -1404,9 +1513,11 @@ async function handleConnectTelegram() {
                                     {editingItem ? "Update plan" : "New plan"}
                                 </p>
                                 <h2 id="calendar-modal-title">
-                                    {editingItem
-                                        ? "Edit calendar item"
-                                        : "Create calendar item"}
+                                    {editingItem?.isRecurringOccurrence
+                                        ? "Edit recurring series"
+                                        : editingItem
+                                          ? "Edit calendar item"
+                                          : "Create calendar item"}
                                 </h2>
                             </div>
 
@@ -1646,6 +1757,121 @@ async function handleConnectTelegram() {
                                             </label>
                                         )}
                                     </div>
+                                )}
+                            </div>
+
+                            <div className="calendar-recurrence-section">
+                                <div className="calendar-recurrence-section__header">
+                                    <div>
+                                        <strong>Repeat</strong>
+                                        <span>Automatically place future occurrences on the calendar.</span>
+                                    </div>
+                                    {form.recurrenceFrequency !== "none" && (
+                                        <span className="calendar-repeat-pill">Recurring</span>
+                                    )}
+                                </div>
+
+                                <div className="calendar-form__row">
+                                    <label className="calendar-field">
+                                        <span>Frequency</span>
+                                        <select
+                                            value={form.recurrenceFrequency}
+                                            onChange={(event) =>
+                                                updateForm("recurrenceFrequency", event.target.value)
+                                            }
+                                        >
+                                            {RECURRENCE_FREQUENCIES.map((frequency) => (
+                                                <option key={frequency} value={frequency}>
+                                                    {frequency === "none"
+                                                        ? "Does not repeat"
+                                                        : frequency[0].toUpperCase() + frequency.slice(1)}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </label>
+
+                                    {form.recurrenceFrequency !== "none" && (
+                                        <label className="calendar-field">
+                                            <span>Repeat every</span>
+                                            <div className="calendar-repeat-interval">
+                                                <input
+                                                    type="number"
+                                                    min="1"
+                                                    max="365"
+                                                    value={form.recurrenceInterval}
+                                                    onChange={(event) =>
+                                                        updateForm("recurrenceInterval", event.target.value)
+                                                    }
+                                                />
+                                                <span>
+                                                    {form.recurrenceFrequency === "daily"
+                                                        ? "day(s)"
+                                                        : form.recurrenceFrequency === "weekly"
+                                                          ? "week(s)"
+                                                          : form.recurrenceFrequency === "monthly"
+                                                            ? "month(s)"
+                                                            : "year(s)"}
+                                                </span>
+                                            </div>
+                                        </label>
+                                    )}
+                                </div>
+
+                                {form.recurrenceFrequency !== "none" && (
+                                    <>
+                                        <label className="calendar-field">
+                                            <span>Ends</span>
+                                            <select
+                                                value={form.recurrenceEndType}
+                                                onChange={(event) =>
+                                                    updateForm("recurrenceEndType", event.target.value)
+                                                }
+                                            >
+                                                <option value="never">Never</option>
+                                                <option value="date">On a date</option>
+                                                <option value="count">After a number of occurrences</option>
+                                            </select>
+                                        </label>
+
+                                        {form.recurrenceEndType === "date" && (
+                                            <label className="calendar-field">
+                                                <span>Last occurrence date</span>
+                                                <input
+                                                    type="date"
+                                                    value={form.recurrenceEndDate}
+                                                    min={
+                                                        form.itemType === "reminder"
+                                                            ? form.dueDate
+                                                            : form.startDate
+                                                    }
+                                                    onChange={(event) =>
+                                                        updateForm("recurrenceEndDate", event.target.value)
+                                                    }
+                                                />
+                                            </label>
+                                        )}
+
+                                        {form.recurrenceEndType === "count" && (
+                                            <label className="calendar-field">
+                                                <span>Number of occurrences</span>
+                                                <input
+                                                    type="number"
+                                                    min="1"
+                                                    max="1000"
+                                                    value={form.recurrenceCount}
+                                                    onChange={(event) =>
+                                                        updateForm("recurrenceCount", event.target.value)
+                                                    }
+                                                />
+                                            </label>
+                                        )}
+                                    </>
+                                )}
+
+                                {editingItem?.isRecurringOccurrence && (
+                                    <p className="calendar-recurring-note">
+                                        This is one occurrence in a recurring series. Saving or deleting it updates the whole series.
+                                    </p>
                                 )}
                             </div>
 

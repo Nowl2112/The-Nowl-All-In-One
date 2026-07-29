@@ -1,3 +1,4 @@
+import calendar
 import json
 import os
 import random
@@ -424,6 +425,12 @@ def _authenticated_identity():
 CALENDAR_VISIBILITIES = frozenset({"personal", "family", "all"})
 CALENDAR_ITEM_TYPES = frozenset({"event", "task", "reminder"})
 CALENDAR_TASK_STATUSES = frozenset({"pending", "in_progress", "completed"})
+CALENDAR_RECURRENCE_FREQUENCIES = frozenset(
+    {"none", "daily", "weekly", "monthly", "yearly"})
+CALENDAR_MAX_OCCURRENCES_PER_QUERY = 1000
+CALENDAR_DEFAULT_RANGE_PAST_DAYS = 31
+CALENDAR_DEFAULT_RANGE_FUTURE_DAYS = 366
+OCCURRENCE_ID_SEPARATOR = "__occurrence__"
 
 
 def _normalize_family_name(value: Any) -> str:
@@ -471,6 +478,187 @@ def _parse_calendar_datetime(
     return parsed.astimezone(SINGAPORE_TZ), None
 
 
+def _normalize_recurrence(
+    value: Any,
+    *,
+    anchor: datetime | None,
+) -> tuple[dict[str, Any], str | None]:
+    if value in (None, "", False):
+        return {"frequency": "none", "interval": 1, "endAt": None, "count": None}, None
+
+    if isinstance(value, str):
+        value = {"frequency": value}
+
+    if not isinstance(value, dict):
+        return {}, "recurrence must be an object"
+
+    frequency = str(value.get("frequency") or "none").strip().lower()
+    if frequency == "annually":
+        frequency = "yearly"
+    if frequency not in CALENDAR_RECURRENCE_FREQUENCIES:
+        return {}, "recurrence.frequency must be none, daily, weekly, monthly, or yearly"
+
+    try:
+        interval = int(value.get("interval", 1))
+    except (TypeError, ValueError):
+        return {}, "recurrence.interval must be a whole number"
+    if interval < 1 or interval > 365:
+        return {}, "recurrence.interval must be between 1 and 365"
+
+    count_value = value.get("count")
+    count = None
+    if count_value not in (None, ""):
+        try:
+            count = int(count_value)
+        except (TypeError, ValueError):
+            return {}, "recurrence.count must be a whole number"
+        if count < 1 or count > 1000:
+            return {}, "recurrence.count must be between 1 and 1000"
+
+    end_at = None
+    if value.get("endAt") not in (None, ""):
+        end_at, error = _parse_calendar_datetime(
+            value.get("endAt"), "recurrence.endAt")
+        if error:
+            return {}, error
+        if anchor and end_at < anchor:
+            return {}, "recurrence.endAt cannot be earlier than the first occurrence"
+
+    if frequency == "none":
+        count = None
+        end_at = None
+
+    return {
+        "frequency": frequency,
+        "interval": interval,
+        "endAt": end_at.isoformat() if end_at else None,
+        "count": count,
+    }, None
+
+
+def _add_months(value: datetime, months: int) -> datetime:
+    month_index = value.month - 1 + months
+    year = value.year + month_index // 12
+    month = month_index % 12 + 1
+    day = min(value.day, calendar.monthrange(year, month)[1])
+    return value.replace(year=year, month=month, day=day)
+
+
+def _next_recurrence_datetime(value: datetime, frequency: str, interval: int) -> datetime:
+    if frequency == "daily":
+        return value + timedelta(days=interval)
+    if frequency == "weekly":
+        return value + timedelta(weeks=interval)
+    if frequency == "monthly":
+        return _add_months(value, interval)
+    if frequency == "yearly":
+        return _add_months(value, 12 * interval)
+    return value
+
+
+def _occurrence_key(value: datetime) -> str:
+    return value.astimezone(SINGAPORE_TZ).isoformat()
+
+
+def _split_occurrence_id(item_id: str) -> tuple[str, str | None]:
+    if OCCURRENCE_ID_SEPARATOR not in item_id:
+        return item_id, None
+    return tuple(item_id.split(OCCURRENCE_ID_SEPARATOR, 1))
+
+
+def _expand_calendar_item(
+    item_id: str,
+    item: dict[str, Any],
+    range_start: datetime,
+    range_end: datetime,
+) -> list[dict[str, Any]]:
+    recurrence = item.get("recurrence") if isinstance(
+        item.get("recurrence"), dict) else {}
+    frequency = str(recurrence.get("frequency") or "none").lower()
+    anchor = _calendar_item_occurs_at(item)
+    if anchor is None:
+        return []
+
+    if frequency == "none":
+        response = _calendar_item_response(item_id, item)
+        return [response] if range_start <= anchor < range_end else []
+
+    interval = max(1, int(recurrence.get("interval") or 1))
+    recurrence_end = _parse_stored_datetime(recurrence.get("endAt"))
+    count = recurrence.get("count")
+    count = int(count) if count not in (None, "") else None
+    completed_keys = set(_normalize_string_list(
+        item.get("completedOccurrenceKeys")))
+    skipped_keys = set(_normalize_string_list(
+        item.get("skippedOccurrenceKeys")))
+
+    start_at = _parse_stored_datetime(item.get("startAt"))
+    end_at = _parse_stored_datetime(item.get("endAt"))
+    due_at = _parse_stored_datetime(item.get("dueAt"))
+    start_offset = (start_at - anchor) if start_at else None
+    end_offset = (end_at - anchor) if end_at else None
+    due_offset = (due_at - anchor) if due_at else None
+
+    results = []
+    current = anchor
+    index = 0
+    while len(results) < CALENDAR_MAX_OCCURRENCES_PER_QUERY:
+        if count is not None and index >= count:
+            break
+        if recurrence_end is not None and current > recurrence_end:
+            break
+        if current >= range_end:
+            break
+
+        key = _occurrence_key(current)
+        if current >= range_start and key not in skipped_keys:
+            occurrence = dict(item)
+            occurrence["startAt"] = (
+                current + start_offset).isoformat() if start_offset is not None else None
+            occurrence["endAt"] = (
+                current + end_offset).isoformat() if end_offset is not None else None
+            occurrence["dueAt"] = (
+                current + due_offset).isoformat() if due_offset is not None else None
+            occurrence["seriesId"] = item_id
+            occurrence["occurrenceKey"] = key
+            occurrence["isRecurringOccurrence"] = True
+            if str(item.get("itemType") or "") == "task":
+                completed = key in completed_keys
+                occurrence["status"] = "completed" if completed else "pending"
+                occurrence["completedAt"] = key if completed else None
+            occurrence_id = f"{item_id}{OCCURRENCE_ID_SEPARATOR}{key}"
+            results.append(_calendar_item_response(occurrence_id, occurrence))
+
+        next_value = _next_recurrence_datetime(current, frequency, interval)
+        if next_value <= current:
+            break
+        current = next_value
+        index += 1
+
+    return results
+
+
+def _parse_calendar_range() -> tuple[datetime | None, datetime | None, str | None]:
+    now = datetime.now(SINGAPORE_TZ)
+    raw_start = request.args.get("start")
+    raw_end = request.args.get("end")
+    if raw_start:
+        range_start, error = _parse_calendar_datetime(raw_start, "start")
+        if error:
+            return None, None, error
+    else:
+        range_start = now - timedelta(days=CALENDAR_DEFAULT_RANGE_PAST_DAYS)
+    if raw_end:
+        range_end, error = _parse_calendar_datetime(raw_end, "end")
+        if error:
+            return None, None, error
+    else:
+        range_end = now + timedelta(days=CALENDAR_DEFAULT_RANGE_FUTURE_DAYS)
+    if range_end <= range_start:
+        return None, None, "end must be later than start"
+    return range_start, range_end, None
+
+
 def _calendar_item_response(
     item_id: str,
     item: dict[str, Any],
@@ -494,6 +682,10 @@ def _calendar_item_response(
         "taggedUsers": item.get("taggedUsers") or [],
         "createdAt": item.get("createdAt"),
         "updatedAt": item.get("updatedAt"),
+        "recurrence": item.get("recurrence") or {"frequency": "none", "interval": 1, "endAt": None, "count": None},
+        "seriesId": item.get("seriesId"),
+        "occurrenceKey": item.get("occurrenceKey"),
+        "isRecurringOccurrence": bool(item.get("isRecurringOccurrence", False)),
     }
 
 
@@ -533,9 +725,16 @@ def _load_calendar_items(
     family_name: str,
     visibility_scope: str,
     item_type: str | None = None,
+    range_start: datetime | None = None,
+    range_end: datetime | None = None,
 ) -> list[dict[str, Any]]:
     snapshots = FIRESTORE_DB.collection("calendarItems").stream()
     items: list[dict[str, Any]] = []
+    now = datetime.now(SINGAPORE_TZ)
+    range_start = range_start or (
+        now - timedelta(days=CALENDAR_DEFAULT_RANGE_PAST_DAYS))
+    range_end = range_end or (
+        now + timedelta(days=CALENDAR_DEFAULT_RANGE_FUTURE_DAYS))
 
     for snapshot in snapshots:
         item = snapshot.to_dict() or {}
@@ -569,7 +768,8 @@ def _load_calendar_items(
             )
 
         if include:
-            items.append(_calendar_item_response(snapshot.id, item))
+            items.extend(_expand_calendar_item(
+                snapshot.id, item, range_start, range_end))
 
     items.sort(
         key=lambda calendar_item: (
@@ -722,15 +922,14 @@ def _get_user_week_ahead_items(
         user.get("familyName")
     )
 
+    now = datetime.now(SINGAPORE_TZ)
+    end_time = now + timedelta(days=TELEGRAM_REMINDER_DAYS_AHEAD)
     visible_items = _load_calendar_items(
         uid=uid,
         family_name=family_name,
         visibility_scope="visible",
-    )
-
-    now = datetime.now(SINGAPORE_TZ)
-    end_time = now + timedelta(
-        days=TELEGRAM_REMINDER_DAYS_AHEAD
+        range_start=now,
+        range_end=end_time,
     )
 
     upcoming_items: list[
@@ -1944,6 +2143,13 @@ def create_calendar_item():
                 {"error": "Calendar items cannot be created in the past"}
             ), 400
 
+    recurrence, recurrence_error = _normalize_recurrence(
+        payload.get("recurrence"),
+        anchor=(start_at if item_type == "event" else due_at),
+    )
+    if recurrence_error:
+        return jsonify({"error": recurrence_error}), 400
+
     status = "pending" if item_type == "task" else None
     now = _now_iso()
     item_ref = FIRESTORE_DB.collection("calendarItems").document()
@@ -1975,6 +2181,9 @@ def create_calendar_item():
         "taggedUsers": tagged_users,
         "createdAt": now,
         "updatedAt": now,
+        "recurrence": recurrence,
+        "completedOccurrenceKeys": [],
+        "skippedOccurrenceKeys": [],
     }
 
     try:
@@ -2004,7 +2213,7 @@ def update_calendar_item(item_id: str):
     if error:
         return error
 
-    normalized_item_id = str(item_id or "").strip()
+    normalized_item_id, _ = _split_occurrence_id(str(item_id or "").strip())
     if not normalized_item_id:
         return jsonify(
             {"error": "Calendar item ID is required"}
@@ -2317,6 +2526,13 @@ def update_calendar_item(item_id: str):
                 }
             ), 400
 
+    recurrence, recurrence_error = _normalize_recurrence(
+        payload.get("recurrence", existing_item.get("recurrence")),
+        anchor=(start_at if item_type == "event" else due_at),
+    )
+    if recurrence_error:
+        return jsonify({"error": recurrence_error}), 400
+
     existing_status = str(
         existing_item.get("status") or "pending"
     ).strip().lower()
@@ -2379,6 +2595,7 @@ def update_calendar_item(item_id: str):
         "taggedUserIds": tagged_user_ids,
         "taggedUsers": tagged_users,
         "updatedAt": _now_iso(),
+        "recurrence": recurrence,
     }
 
     if (
@@ -2425,7 +2642,7 @@ def delete_calendar_item(item_id: str):
     if error:
         return error
 
-    normalized_item_id = str(item_id or "").strip()
+    normalized_item_id, _ = _split_occurrence_id(str(item_id or "").strip())
     if not normalized_item_id:
         return jsonify(
             {"error": "Calendar item ID is required"}
@@ -2510,12 +2727,18 @@ def get_visible_calendar_items():
             {"error": "type must be event, task, or reminder"}
         ), 400
 
+    range_start, range_end, range_error = _parse_calendar_range()
+    if range_error:
+        return jsonify({"error": range_error}), 400
+
     try:
         items = _load_calendar_items(
             uid=identity["uid"],
             family_name=family_name,
             visibility_scope="visible",
             item_type=item_type,
+            range_start=range_start,
+            range_end=range_end,
         )
     except Exception as database_error:
         app.logger.exception(
@@ -2605,6 +2828,8 @@ def get_upcoming_calendar_items():
         family_name=family_name,
         visibility_scope="visible",
         item_type=item_type,
+        range_start=now,
+        range_end=now + timedelta(days=365 * 5),
     )
 
     upcoming: list[tuple[datetime, dict[str, Any]]] = []
@@ -2645,7 +2870,9 @@ def update_calendar_task_status(item_id: str):
     if error:
         return error
 
-    item_ref = _document("calendarItems", item_id)
+    series_id, occurrence_key = _split_occurrence_id(
+        str(item_id or "").strip())
+    item_ref = _document("calendarItems", series_id)
     snapshot = item_ref.get()
     if not snapshot.exists:
         return jsonify({"error": "Task not found"}), 404
@@ -2664,20 +2891,45 @@ def update_calendar_task_status(item_id: str):
             {"error": "status must be pending, in_progress, or completed"}
         ), 400
 
-    updates = {
-        "status": status,
-        "completedAt": _now_iso() if status == "completed" else None,
-        "updatedAt": _now_iso(),
-    }
-    item_ref.set(updates, merge=True)
-    item.update(updates)
+    recurrence = item.get("recurrence") if isinstance(
+        item.get("recurrence"), dict) else {}
+    is_recurring = str(recurrence.get("frequency") or "none") != "none"
 
-    return jsonify(
-        {
-            "message": "Task status updated",
-            "item": _calendar_item_response(item_id, item),
+    if is_recurring and occurrence_key:
+        completed_keys = set(_normalize_string_list(
+            item.get("completedOccurrenceKeys")))
+        if status == "completed":
+            completed_keys.add(occurrence_key)
+        else:
+            completed_keys.discard(occurrence_key)
+        updates = {
+            "completedOccurrenceKeys": sorted(completed_keys),
+            "updatedAt": _now_iso(),
         }
-    )
+        item_ref.set(updates, merge=True)
+        item.update(updates)
+        occurrence_dt = _parse_stored_datetime(occurrence_key)
+        if occurrence_dt is None:
+            return jsonify({"error": "Invalid recurring occurrence ID"}), 400
+        expanded = _expand_calendar_item(
+            series_id,
+            item,
+            occurrence_dt - timedelta(seconds=1),
+            occurrence_dt + timedelta(seconds=1),
+        )
+        response_item = expanded[0] if expanded else _calendar_item_response(
+            item_id, item)
+    else:
+        updates = {
+            "status": status,
+            "completedAt": _now_iso() if status == "completed" else None,
+            "updatedAt": _now_iso(),
+        }
+        item_ref.set(updates, merge=True)
+        item.update(updates)
+        response_item = _calendar_item_response(series_id, item)
+
+    return jsonify({"message": "Task status updated", "item": response_item})
 
 
 # ---------------------------------------------------------------------------
