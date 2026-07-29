@@ -101,6 +101,30 @@ function HomePage() {
     const [upcomingStatus, setUpcomingStatus] = useState("idle");
     const [upcomingError, setUpcomingError] = useState("");
 
+    const [activeToolIndex, setActiveToolIndex] = useState(0);
+    const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+
+    const usefulTools = useMemo(
+        () => [
+            { id: "calendar", label: "Calendar" },
+            { id: "headlines", label: "Today’s headlines" },
+            { id: "task-boards", label: "Task boards" },
+        ],
+        [],
+    );
+
+    const showPreviousTool = () => {
+        setActiveToolIndex((currentIndex) =>
+            currentIndex === 0 ? usefulTools.length - 1 : currentIndex - 1,
+        );
+    };
+
+    const showNextTool = () => {
+        setActiveToolIndex((currentIndex) =>
+            currentIndex === usefulTools.length - 1 ? 0 : currentIndex + 1,
+        );
+    };
+
     const getAuthHeaders = useCallback(async () => {
         if (!currentUser) {
             throw new Error("You must be signed in.");
@@ -351,7 +375,67 @@ function HomePage() {
 
     return (
         <main className="home-page">
-            <div className="home-shell">
+            <aside
+                className={`home-sidebar ${isSidebarCollapsed ? "home-sidebar--collapsed" : ""}`}
+                aria-label="Main navigation"
+            >
+                <div className="home-sidebar__topbar">
+                    <button
+                        type="button"
+                        className="home-sidebar__brand"
+                        onClick={() => navigate("/")}
+                        aria-label="Go to homepage"
+                    >
+                        <img src={kotaroImage} alt="" />
+                        <span className="home-sidebar__label">The Nowl</span>
+                    </button>
+
+                    <button
+                        type="button"
+                        className="home-sidebar__toggle"
+                        onClick={() => setIsSidebarCollapsed((current) => !current)}
+                        aria-label={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+                        aria-expanded={!isSidebarCollapsed}
+                    >
+                        <span aria-hidden="true">{isSidebarCollapsed ? "›" : "‹"}</span>
+                    </button>
+                </div>
+
+                <nav className="home-sidebar__nav">
+                    <a href="#overview" title="Overview">
+                        <span className="home-sidebar__icon" aria-hidden="true">⌂</span>
+                        <span className="home-sidebar__label">Overview</span>
+                    </a>
+                    <a href="#useful-tools" title="Useful tools">
+                        <span className="home-sidebar__icon" aria-hidden="true">▦</span>
+                        <span className="home-sidebar__label">Useful tools</span>
+                    </a>
+                    <a href="#games" title="Games">
+                        <span className="home-sidebar__icon" aria-hidden="true">◆</span>
+                        <span className="home-sidebar__label">Games</span>
+                    </a>
+                    <a href="#leaderboard" title="Leaderboard">
+                        <span className="home-sidebar__icon" aria-hidden="true">★</span>
+                        <span className="home-sidebar__label">Leaderboard</span>
+                    </a>
+                </nav>
+
+                <div className="home-sidebar__quick-links">
+                    <p className="home-sidebar__label">Quick access</p>
+                    <button type="button" onClick={() => navigate("/calendar")} title="Calendar">
+                        <span className="home-sidebar__icon" aria-hidden="true">▣</span>
+                        <span className="home-sidebar__label">Calendar</span>
+                        <span className="home-sidebar__label" aria-hidden="true">→</span>
+                    </button>
+                    <button type="button" onClick={() => navigate("/task-boards")} title="Task boards">
+                        <span className="home-sidebar__icon" aria-hidden="true">☷</span>
+                        <span className="home-sidebar__label">Task boards</span>
+                        <span className="home-sidebar__label" aria-hidden="true">→</span>
+                    </button>
+                </div>
+            </aside>
+
+            <div className={`home-shell ${isSidebarCollapsed ? "home-shell--sidebar-collapsed" : ""}`} id="overview">
                 <header className="home-nav">
                     <button
                         type="button"
@@ -381,116 +465,213 @@ function HomePage() {
                 </header>
 
 
-                <section className="upcoming-week-card">
-                    <div className="upcoming-week-card__header">
+                <section className="useful-tools-section" id="useful-tools">
+                    <div className="useful-tools-section__header">
                         <div>
-                            <p className="home-section-label">
-                                Your week ahead
-                            </p>
-                            <h2>Upcoming items</h2>
+                            <p className="home-section-label">At a glance</p>
+                            <h2>Useful tools</h2>
                             <p>
-                                Events, tasks, and reminders scheduled within
-                                the next seven days.
+                                Check what matters now, then jump straight into
+                                the full tool when you need more detail.
                             </p>
                         </div>
 
-                        <div className="upcoming-week-card__actions">
+                        <div className="tool-carousel__controls">
                             <button
                                 type="button"
-                                className="button button--ghost"
-                                onClick={() => navigate("/calendar")}
+                                onClick={showPreviousTool}
+                                aria-label="Show previous tool"
                             >
-                                Open calendar
+                                ←
                             </button>
-
                             <button
                                 type="button"
-                                className="upcoming-refresh-button"
-                                onClick={() => loadUpcomingItems()}
-                                disabled={upcomingStatus === "loading"}
+                                onClick={showNextTool}
+                                aria-label="Show next tool"
                             >
-                                {upcomingStatus === "loading"
-                                    ? "Loading..."
-                                    : "Refresh"}
+                                →
                             </button>
                         </div>
                     </div>
 
-                    {upcomingStatus === "loading" && (
-                        <div className="upcoming-state">
-                            Loading your week...
-                        </div>
-                    )}
+                    <div className="tool-carousel__tabs" role="tablist" aria-label="Useful tools">
+                        {usefulTools.map((tool, index) => (
+                            <button
+                                type="button"
+                                role="tab"
+                                aria-selected={activeToolIndex === index}
+                                className={activeToolIndex === index ? "is-active" : ""}
+                                key={tool.id}
+                                onClick={() => setActiveToolIndex(index)}
+                            >
+                                {tool.label}
+                            </button>
+                        ))}
+                    </div>
 
-                    {upcomingStatus === "error" && (
-                        <div className="upcoming-state upcoming-state--error">
-                            {upcomingError}
-                        </div>
-                    )}
+                    <div className="tool-carousel" aria-live="polite">
+                        {activeToolIndex === 0 && (
+                            <article className="tool-slide tool-slide--calendar">
+                                <div className="tool-slide__topline">
+                                    <div>
+                                        <span className="tool-slide__icon" aria-hidden="true">▦</span>
+                                        <div>
+                                            <p>Calendar</p>
+                                            <h3>Your next seven days</h3>
+                                        </div>
+                                    </div>
 
-                    {upcomingStatus === "success" &&
-                        upcomingItems.length === 0 && (
-                            <div className="upcoming-empty">
-                                <div
-                                    className="upcoming-empty__icon"
-                                    aria-hidden="true"
-                                >
-                                    ✓
+                                    <div className="tool-slide__actions">
+                                        <button
+                                            type="button"
+                                            className="button button--ghost"
+                                            onClick={() => loadUpcomingItems()}
+                                            disabled={upcomingStatus === "loading"}
+                                        >
+                                            {upcomingStatus === "loading" ? "Loading..." : "Refresh"}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="button button--primary"
+                                            onClick={() => navigate("/calendar")}
+                                        >
+                                            Open calendar
+                                        </button>
+                                    </div>
                                 </div>
-                                <div>
-                                    <strong>Your week is clear.</strong>
-                                    <span>
-                                        Add an event, task, or reminder from
-                                        the calendar.
-                                    </span>
-                                </div>
-                            </div>
+
+                                {upcomingStatus === "loading" && (
+                                    <div className="upcoming-state">Loading your week...</div>
+                                )}
+
+                                {upcomingStatus === "error" && (
+                                    <div className="upcoming-state upcoming-state--error">
+                                        {upcomingError}
+                                    </div>
+                                )}
+
+                                {upcomingStatus === "success" && upcomingItems.length === 0 && (
+                                    <div className="upcoming-empty">
+                                        <div className="upcoming-empty__icon" aria-hidden="true">✓</div>
+                                        <div>
+                                            <strong>Your week is clear.</strong>
+                                            <span>Add an event, task, or reminder from the calendar.</span>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {upcomingStatus === "success" && upcomingItems.length > 0 && (
+                                    <div className="tool-calendar-list">
+                                        {upcomingItems.slice(0, 4).map((item) => (
+                                            <button
+                                                type="button"
+                                                className={`upcoming-item upcoming-item--${item.itemType}`}
+                                                key={item.id}
+                                                onClick={() => navigate("/calendar")}
+                                            >
+                                                <span className="upcoming-item__date-block" aria-hidden="true">
+                                                    <strong>{getUpcomingDay(item)}</strong>
+                                                    <span>{getUpcomingMonth(item)}</span>
+                                                </span>
+                                                <span className="upcoming-item__content">
+                                                    <span className="upcoming-item__topline">
+                                                        <strong>{item.title}</strong>
+                                                        <span className={`upcoming-item__type upcoming-item__type--${item.itemType}`}>
+                                                            {item.itemType}
+                                                        </span>
+                                                    </span>
+                                                    <span className="upcoming-item__date">
+                                                        {formatUpcomingDate(item)}
+                                                    </span>
+                                                </span>
+                                                <span className="upcoming-item__arrow" aria-hidden="true">→</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </article>
                         )}
 
-                    {upcomingStatus === "success" &&
-                        upcomingItems.length > 0 && (
-                            <div className="upcoming-list">
-                                {upcomingItems.map((item) => (
+                        {/*{activeToolIndex === 1 && (
+                            <article className="tool-slide tool-slide--headlines">
+                                <div className="tool-slide__topline">
+                                    <div>
+                                        <span className="tool-slide__icon" aria-hidden="true">◫</span>
+                                        <div>
+                                            <p>Today’s headlines</p>
+                                            <h3>Your daily news briefing</h3>
+                                        </div>
+                                    </div>
+                                    <span className="tool-status-pill">Coming soon</span>
+                                </div>
+
+                                <div className="headline-preview-list">
+                                    {[
+                                        "Top stories selected for the family",
+                                        "Short summaries without the clutter",
+                                        "Open the full article when something matters",
+                                    ].map((headline, index) => (
+                                        <div className="headline-preview" key={headline}>
+                                            <span>{String(index + 1).padStart(2, "0")}</span>
+                                            <strong>{headline}</strong>
+                                        </div>
+                                    ))}
+                                </div>
+                            </article>
+                        )}
+
+                        {activeToolIndex === 2 && (
+                            <article className="tool-slide tool-slide--boards">
+                                <div className="tool-slide__topline">
+                                    <div>
+                                        <span className="tool-slide__icon" aria-hidden="true">▤</span>
+                                        <div>
+                                            <p>Task boards</p>
+                                            <h3>Keep shared work moving</h3>
+                                        </div>
+                                    </div>
                                     <button
                                         type="button"
-                                        className={`upcoming-item upcoming-item--${item.itemType}`}
-                                        key={item.id}
-                                        onClick={() => navigate("/calendar")}
+                                        className="button button--primary"
+                                        onClick={() => navigate("/task-boards")}
                                     >
-                                        <span className="upcoming-item__date-block" aria-hidden="true">
-                                            <strong>{getUpcomingDay(item)}</strong>
-                                            <span>{getUpcomingMonth(item)}</span>
-                                        </span>
-
-                                        <span className="upcoming-item__content">
-                                            <span className="upcoming-item__topline">
-                                                <strong>{item.title}</strong>
-                                                <span className={`upcoming-item__type upcoming-item__type--${item.itemType}`}>
-                                                    {item.itemType}
-                                                </span>
-                                            </span>
-
-                                            <span className="upcoming-item__date">
-                                                {formatUpcomingDate(item)}
-                                            </span>
-
-                                            {item.description && (
-                                                <span className="upcoming-item__description">
-                                                    {item.description}
-                                                </span>
-                                            )}
-                                        </span>
-
-                                        <span className="upcoming-item__arrow" aria-hidden="true">
-                                            →
-                                        </span>
+                                        Go to task boards
                                     </button>
-                                ))}
-                            </div>
-                        )}
+                                </div>
+
+                                <div className="board-preview">
+                                    {[
+                                        ["Backlog", "Plan birthday dinner", "3 cards"],
+                                        ["In progress", "Book family trip", "2 cards"],
+                                        ["Completed", "Update shared calendar", "5 cards"],
+                                    ].map(([title, task, count]) => (
+                                        <div className="board-preview__column" key={title}>
+                                            <div>
+                                                <strong>{title}</strong>
+                                                <span>{count}</span>
+                                            </div>
+                                            <p>{task}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            </article>
+                        )}*/}
+                    </div>
+
+                    <div className="tool-carousel__dots" aria-label="Choose useful tool">
+                        {usefulTools.map((tool, index) => (
+                            <button
+                                type="button"
+                                key={tool.id}
+                                className={activeToolIndex === index ? "is-active" : ""}
+                                aria-label={`Show ${tool.label}`}
+                                onClick={() => setActiveToolIndex(index)}
+                            />
+                        ))}
+                    </div>
                 </section>
 
-                <section className="home-hero">
+                <section className="home-hero" id="games">
                     <div className="home-hero__copy">
                         <p className="home-eyebrow">Game corner</p>
                         <h1>Welcome back, {firstName}.</h1>

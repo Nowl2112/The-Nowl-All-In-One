@@ -7,6 +7,8 @@ import LoginPage from "../pages/login/login.jsx";
 import WordleRanked from "../pages/wordle/wordleRanked.jsx";
 import ResetPasswordPage from "../pages/resetPassword/resetPassword.jsx";
 import CalendarPage from "../pages/calendar/calendar.jsx";
+import TaskBoardPage from "../pages/taskBoard/TaskBoard.jsx";
+
 function AppRoutes() {
     return (
         <Routes>
@@ -29,6 +31,7 @@ function AppRoutes() {
                     </ProtectedRoute>
                 }
             />
+            <Route path="/task-boards" element={<ProtectedRoute><TaskBoardPage /></ProtectedRoute>} />
             <Route
                 path="/calendar"
                 element={
