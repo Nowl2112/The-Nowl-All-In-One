@@ -4,6 +4,9 @@ import { useAuth } from "../../context/authContext.jsx";
 import haruImage from "../../assets/haru.png";
 import kotaroImage from "../../assets/kotaro.png";
 import kotaroNewsImage from "../../assets/kotaro-news.png";
+import calendarToolIcon from "../../assets/seckotaro.png";
+import newsToolIcon from "../../assets/news-tool-icon.png";
+import taskBoardsToolIcon from "../../assets/taskboard-tool-icon.png";
 import "./homepage.css";
 
 const API_BASE_URL =
@@ -86,6 +89,26 @@ async function readJsonResponse(response) {
     return response.json();
 }
 
+function formatHeadlineTime(article) {
+    const rawDate =
+        article?.publishedAt ||
+        article?.published_at ||
+        article?.pubDate ||
+        article?.date;
+
+    if (!rawDate) return "Latest update";
+
+    const parsedDate = new Date(rawDate);
+    if (Number.isNaN(parsedDate.getTime())) return "Latest update";
+
+    return parsedDate.toLocaleString("en-SG", {
+        day: "numeric",
+        month: "short",
+        hour: "numeric",
+        minute: "2-digit",
+    });
+}
+
 function HomePage() {
     const navigate = useNavigate();
     const { logout, currentUser } = useAuth();
@@ -105,6 +128,10 @@ function HomePage() {
     const [taskBoards, setTaskBoards] = useState([]);
     const [taskBoardsStatus, setTaskBoardsStatus] = useState("idle");
     const [taskBoardsError, setTaskBoardsError] = useState("");
+
+    const [headlines, setHeadlines] = useState([]);
+    const [headlinesStatus, setHeadlinesStatus] = useState("idle");
+    const [headlinesError, setHeadlinesError] = useState("");
 
     const [activeToolIndex, setActiveToolIndex] = useState(0);
 
@@ -303,6 +330,59 @@ function HomePage() {
         [currentUser, getAuthHeaders],
     );
 
+    const loadHeadlines = useCallback(
+        async (signal) => {
+            if (!currentUser) {
+                setHeadlines([]);
+                setHeadlinesStatus("idle");
+                return;
+            }
+
+            setHeadlinesStatus("loading");
+            setHeadlinesError("");
+
+            try {
+                const headers = await getAuthHeaders();
+                const response = await fetch(
+                    `${API_BASE_URL}/api/news/headlines?limit=5`,
+                    {
+                        method: "GET",
+                        headers,
+                        signal,
+                        cache: "no-store",
+                    },
+                );
+
+                const data = await readJsonResponse(response);
+
+                if (!response.ok) {
+                    throw new Error(data.error || "Could not load today's headlines.");
+                }
+
+                const articleList = Array.isArray(data.articles)
+                    ? data.articles
+                    : Array.isArray(data.headlines)
+                      ? data.headlines
+                      : Array.isArray(data.items)
+                        ? data.items
+                        : [];
+
+                setHeadlines(articleList.slice(0, 5));
+                setHeadlinesStatus("success");
+            } catch (error) {
+                if (error?.name === "AbortError") return;
+
+                console.error("Unable to load headlines:", error);
+                setHeadlines([]);
+                setHeadlinesError(
+                    error?.message || "Could not load today's headlines.",
+                );
+                setHeadlinesStatus("error");
+            }
+        },
+        [currentUser, getAuthHeaders],
+    );
+
     const loadTaskBoards = useCallback(
         async (signal) => {
             if (!currentUser) {
@@ -387,12 +467,14 @@ function HomePage() {
             loadCurrentPlayer(),
             loadLeaderboard(),
             loadUpcomingItems(),
+            loadHeadlines(),
             loadTaskBoards(),
         ]);
     }, [
         loadCurrentPlayer,
         loadLeaderboard,
         loadUpcomingItems,
+        loadHeadlines,
         loadTaskBoards,
     ]);
 
@@ -401,6 +483,7 @@ function HomePage() {
             setCurrentPlayer(null);
             setLeaderboard([]);
             setUpcomingItems([]);
+            setHeadlines([]);
             setTaskBoards([]);
             return undefined;
         }
@@ -411,6 +494,7 @@ function HomePage() {
             loadCurrentPlayer(controller.signal),
             loadLeaderboard(controller.signal),
             loadUpcomingItems(controller.signal),
+            loadHeadlines(controller.signal),
             loadTaskBoards(controller.signal),
         ]);
 
@@ -420,6 +504,7 @@ function HomePage() {
         loadCurrentPlayer,
         loadLeaderboard,
         loadUpcomingItems,
+        loadHeadlines,
         loadTaskBoards,
     ]);
 
@@ -457,6 +542,8 @@ function HomePage() {
             setLeaderboardError("");
             setUpcomingItems([]);
             setUpcomingError("");
+            setHeadlines([]);
+            setHeadlinesError("");
             setTaskBoards([]);
             setTaskBoardsError("");
 
@@ -548,7 +635,12 @@ function HomePage() {
                             <article className="tool-slide tool-slide--calendar">
                                 <div className="tool-slide__topline">
                                     <div>
-                                        <span className="tool-slide__icon" aria-hidden="true">▦</span>
+                                            <img
+                                                style={{ width: "auto", height: "50px" }}
+                                                src={calendarToolIcon}
+                                                alt=""
+                                                className="tool-slide__icon-image"
+                                            />
                                         <div>
                                             <p>Calendar</p>
                                             <h3>Your next seven days</h3>
@@ -574,55 +666,57 @@ function HomePage() {
                                     </div>
                                 </div>
 
-                                {upcomingStatus === "loading" && (
-                                    <div className="upcoming-state">Loading your week...</div>
-                                )}
+                                <div className="tool-slide__scroll">
+                                    {upcomingStatus === "loading" && (
+                                        <div className="upcoming-state">Loading your week...</div>
+                                    )}
 
-                                {upcomingStatus === "error" && (
-                                    <div className="upcoming-state upcoming-state--error">
-                                        {upcomingError}
-                                    </div>
-                                )}
-
-                                {upcomingStatus === "success" && upcomingItems.length === 0 && (
-                                    <div className="upcoming-empty">
-                                        <div className="upcoming-empty__icon" aria-hidden="true">✓</div>
-                                        <div>
-                                            <strong>Your week is clear.</strong>
-                                            <span>Add an event, task, or reminder from the calendar.</span>
+                                    {upcomingStatus === "error" && (
+                                        <div className="upcoming-state upcoming-state--error">
+                                            {upcomingError}
                                         </div>
-                                    </div>
-                                )}
+                                    )}
 
-                                {upcomingStatus === "success" && upcomingItems.length > 0 && (
-                                    <div className="tool-calendar-list">
-                                        {upcomingItems.slice(0, 4).map((item) => (
-                                            <button
-                                                type="button"
-                                                className={`upcoming-item upcoming-item--${item.itemType}`}
-                                                key={item.id}
-                                                onClick={() => navigate("/calendar")}
-                                            >
-                                                <span className="upcoming-item__date-block" aria-hidden="true">
-                                                    <strong>{getUpcomingDay(item)}</strong>
-                                                    <span>{getUpcomingMonth(item)}</span>
-                                                </span>
-                                                <span className="upcoming-item__content">
-                                                    <span className="upcoming-item__topline">
-                                                        <strong>{item.title}</strong>
-                                                        <span className={`upcoming-item__type upcoming-item__type--${item.itemType}`}>
-                                                            {item.itemType}
+                                    {upcomingStatus === "success" && upcomingItems.length === 0 && (
+                                        <div className="upcoming-empty">
+                                            <div className="upcoming-empty__icon" aria-hidden="true">✓</div>
+                                            <div>
+                                                <strong>Your week is clear.</strong>
+                                                <span>Add an event, task, or reminder from the calendar.</span>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {upcomingStatus === "success" && upcomingItems.length > 0 && (
+                                        <div className="tool-calendar-list">
+                                            {upcomingItems.slice(0, 4).map((item) => (
+                                                <button
+                                                    type="button"
+                                                    className={`upcoming-item upcoming-item--${item.itemType}`}
+                                                    key={item.id}
+                                                    onClick={() => navigate("/calendar")}
+                                                >
+                                                    <span className="upcoming-item__date-block" aria-hidden="true">
+                                                        <strong>{getUpcomingDay(item)}</strong>
+                                                        <span>{getUpcomingMonth(item)}</span>
+                                                    </span>
+                                                    <span className="upcoming-item__content">
+                                                        <span className="upcoming-item__topline">
+                                                            <strong>{item.title}</strong>
+                                                            <span className={`upcoming-item__type upcoming-item__type--${item.itemType}`}>
+                                                                {item.itemType}
+                                                            </span>
+                                                        </span>
+                                                        <span className="upcoming-item__date">
+                                                            {formatUpcomingDate(item)}
                                                         </span>
                                                     </span>
-                                                    <span className="upcoming-item__date">
-                                                        {formatUpcomingDate(item)}
-                                                    </span>
-                                                </span>
-                                                <span className="upcoming-item__arrow" aria-hidden="true">→</span>
-                                            </button>
-                                        ))}
-                                    </div>
-                                )}
+                                                    <span className="upcoming-item__arrow" aria-hidden="true">→</span>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
                             </article>
                         )}
 
@@ -630,32 +724,108 @@ function HomePage() {
                             <article className="tool-slide tool-slide--headlines">
                                 <div className="tool-slide__topline">
                                     <div>
-                                        <span className="tool-slide__icon" aria-hidden="true">📰</span>
+                                            <img
+                                                style={{ width: "auto", height: "50px" }}
+                                                src={newsToolIcon}
+                                                alt=""
+                                                className="tool-slide__icon-image"
+                                            />
                                         <div>
-                                            <p>Today's Headlines</p>
-                                            <h3>Coming Soon</h3>
+                                            <p>Today's headlines</p>
+                                            <h3>What is happening now</h3>
                                         </div>
                                     </div>
 
-                                    <span className="tool-status-pill">In Development</span>
+                                    <div className="tool-slide__actions">
+                                        <button
+                                            type="button"
+                                            className="button button--ghost"
+                                            onClick={() => loadHeadlines()}
+                                            disabled={headlinesStatus === "loading"}
+                                        >
+                                            {headlinesStatus === "loading"
+                                                ? "Loading..."
+                                                : "Refresh"}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="button button--primary"
+                                            onClick={() => navigate("/news")}
+                                        >
+                                            Open News Center
+                                        </button>
+                                    </div>
                                 </div>
 
-                                <div className="headline-coming-soon">
-                                    <img
-                                        src={kotaroNewsImage}   // import your image
-                                        alt="Kotaro looking for today's news"
-                                        className="headline-coming-soon__image"
-                                    />
+                                <div className="tool-slide__scroll">
+                                    {headlinesStatus === "loading" && (
+                                        <div className="headline-widget-state">
+                                            Kotaro is gathering the latest stories...
+                                        </div>
+                                    )}
 
-                                    <div className="headline-coming-soon__content">
-                                        <h4>Feature not available yet.</h4>
+                                    {headlinesStatus === "error" && (
+                                        <div className="headline-widget-state headline-widget-state--error">
+                                            {headlinesError}
+                                        </div>
+                                    )}
 
-                                        <p>
-                                            Kotaro is still looking for today's articles...
-                                            <br />
-                                            Please check back soon!
-                                        </p>
-                                    </div>
+                                    {headlinesStatus === "success" && headlines.length === 0 && (
+                                        <div className="headline-widget-empty">
+                                            <img
+                                                src={kotaroNewsImage}
+                                                alt="Kotaro looking for today's news"
+                                            />
+                                            <div>
+                                                <strong>No headlines found yet.</strong>
+                                                <p>Try refreshing again in a moment.</p>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {headlinesStatus === "success" && headlines.length > 0 && (
+                                        <div className="headline-widget-list">
+                                            {headlines.slice(0, 4).map((article, index) => {
+                                                const articleId =
+                                                    article.id ||
+                                                    article.articleId ||
+                                                    article.url ||
+                                                    `${article.title}-${index}`;
+
+                                                return (
+                                                    <button
+                                                        type="button"
+                                                        className="headline-widget-item"
+                                                        key={articleId}
+                                                        onClick={() =>
+                                                            navigate("/news", {
+                                                                state: {
+                                                                    articleId: article.id || article.articleId || null,
+                                                                },
+                                                            })
+                                                        }
+                                                    >
+                                                        <span className="headline-widget-item__number">
+                                                            {String(index + 1).padStart(2, "0")}
+                                                        </span>
+
+                                                        <span className="headline-widget-item__copy">
+                                                            <strong>{article.title || "Untitled story"}</strong>
+                                                            <span>
+                                                                {article.source || article.publisher || "News"}
+                                                                {" · "}
+                                                                {formatHeadlineTime(article)}
+                                                            </span>
+                                                        </span>
+
+                                                        <span className="headline-widget-item__arrow" aria-hidden="true">
+                                                            →
+                                                        </span>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
                                 </div>
                             </article>
                         )}
@@ -664,7 +834,12 @@ function HomePage() {
                             <article className="tool-slide tool-slide--boards">
                                 <div className="tool-slide__topline">
                                     <div>
-                                        <span className="tool-slide__icon" aria-hidden="true">▤</span>
+                                            <img
+                                                style={{ width: "auto", height: "50px" }}
+                                                src={taskBoardsToolIcon}
+                                                alt=""
+                                                className="tool-slide__icon-image"
+                                            />
                                         <div>
                                             <p>Task boards</p>
                                             <h3>Keep shared work moving</h3>
@@ -692,20 +867,21 @@ function HomePage() {
                                     </div>
                                 </div>
 
-                                {taskBoardsStatus === "loading" && (
-                                    <div className="board-widget-state">
-                                        Loading your boards...
-                                    </div>
-                                )}
+                                <div className="tool-slide__scroll">
+                                    {taskBoardsStatus === "loading" && (
+                                        <div className="board-widget-state">
+                                            Loading your boards...
+                                        </div>
+                                    )}
 
-                                {taskBoardsStatus === "error" && (
-                                    <div className="board-widget-state board-widget-state--error">
-                                        {taskBoardsError}
-                                    </div>
-                                )}
+                                    {taskBoardsStatus === "error" && (
+                                        <div className="board-widget-state board-widget-state--error">
+                                            {taskBoardsError}
+                                        </div>
+                                    )}
 
-                                {taskBoardsStatus === "success" &&
-                                    taskBoards.length === 0 && (
+                                    {taskBoardsStatus === "success" &&
+                                        taskBoards.length === 0 && (
                                         <div className="board-widget-empty">
                                             <span aria-hidden="true">☷</span>
                                             <div>
@@ -792,6 +968,7 @@ function HomePage() {
                                             })}
                                         </div>
                                     )}
+                                </div>
                             </article>
                         )}
                     </div>

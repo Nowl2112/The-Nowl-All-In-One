@@ -8,7 +8,10 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
-
+import feedparser
+from email.utils import parsedate_to_datetime
+from functools import lru_cache
+from urllib.parse import urlparse
 import requests
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request, send_from_directory
@@ -2933,8 +2936,2274 @@ def update_calendar_task_status(item_id: str):
 
 
 # ---------------------------------------------------------------------------
+# News configuration
+# ---------------------------------------------------------------------------
+
+CNA_RSS_FEEDS = {
+    "latest": (
+        "https://www.channelnewsasia.com/api/v1/"
+        "rss-outbound-feed?_format=xml"
+    ),
+    "singapore": (
+        "https://www.channelnewsasia.com/api/v1/"
+        "rss-outbound-feed?_format=xml&category=10416"
+    ),
+    "asia": (
+        "https://www.channelnewsasia.com/api/v1/"
+        "rss-outbound-feed?_format=xml&category=6511"
+    ),
+    "world": (
+        "https://www.channelnewsasia.com/api/v1/"
+        "rss-outbound-feed?_format=xml&category=6311"
+    ),
+}
+
+NEWS_REQUEST_TIMEOUT_SECONDS = 12
+NEWS_CACHE_SECONDS = 300
+NEWS_MAX_LIMIT = 100
+
+# ---------------------------------------------------------------------------
+# AI news summary configuration
+# ---------------------------------------------------------------------------
+
+HF_TOKEN = os.getenv(
+    "HF_TOKEN",
+    "",
+).strip()
+
+HF_NEWS_MODEL = os.getenv(
+    "HF_NEWS_MODEL",
+    "deepseek-ai/DeepSeek-V4-Flash:featherless-ai",
+).strip()
+
+HF_NEWS_API_URL = (
+    "https://router.huggingface.co/v1/chat/completions"
+)
+
+HF_NEWS_TIMEOUT_SECONDS = int(
+    os.getenv("HF_NEWS_TIMEOUT_SECONDS", "90")
+)
+
+NEWS_SUMMARY_WINDOW_HOURS = 24
+# The endpoint can summarise every article returned by the feed. The limit is
+# only a safety cap against unexpectedly large or malicious client payloads.
+NEWS_SUMMARY_MAX_ARTICLES = int(os.getenv("NEWS_SUMMARY_MAX_ARTICLES", "100"))
+NEWS_SUMMARY_MIN_ARTICLES = 1
+NEWS_SUMMARY_BATCH_SIZE = max(
+    1,
+    min(int(os.getenv("NEWS_SUMMARY_BATCH_SIZE", "6")), 10),
+)
+NEWS_SUMMARY_MAX_OUTPUT_TOKENS = int(
+    os.getenv("NEWS_SUMMARY_MAX_OUTPUT_TOKENS", "1800")
+)
+
+# Words that usually indicate an article has broad public importance.
+# The scores are deliberately transparent and easy to adjust.
+NEWS_IMPORTANCE_KEYWORDS = {
+    # Major emergencies and public safety
+    "breaking": 10,
+    "emergency": 10,
+    "earthquake": 7,
+    "tsunami": 7,
+    "war": 7,
+    "attack": 7,
+    "terror": 7,
+    "explosion": 6,
+    "evacuation": 6,
+    "disaster": 6,
+    "fatal": 7,
+    "death": 6,
+    "killed": 7,
+    "injured": 5,
+    "outbreak": 8,
+    "pandemic": 9,
+
+    # Government and major policy
+    "prime minister": 9,
+    "president": 8,
+    "parliament": 8,
+    "government": 8,
+    "ministry": 7,
+    "election": 9,
+    "budget": 7,
+    "law": 6,
+    "policy": 5,
+    "ban": 6,
+
+    # Economy and infrastructure
+    "recession": 8,
+    "inflation": 7,
+    "interest rate": 7,
+    "job cuts": 8,
+    "retrenchment": 8,
+    "market crash": 9,
+    "outage": 8,
+    "disruption": 9,
+    "transport": 7,
+    "mrt": 8,
+    "airport": 5,
+
+    # Singapore-specific high-impact issues
+    "singapore": 3,
+    "scam": 5,
+    "hdb": 5,
+    "cpf": 5,
+    "coe": 5,
+    "gst": 6,
+    "mas": 6,
+    "moh": 6,
+    "mof": 6,
+    "mom": 5,
+    "lta": 5,
+    "police": 8,
+}
+
+
+def _strip_html(value: Any) -> str:
+    """Remove basic HTML tags from RSS summaries."""
+    text = str(value or "")
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def _parse_news_datetime(entry: Any) -> datetime | None:
+    """
+    Parse the publication date supplied by an RSS entry.
+
+    feedparser commonly provides either published_parsed,
+    updated_parsed, published, or updated.
+    """
+    parsed_time = (
+        entry.get("published_parsed")
+        or entry.get("updated_parsed")
+    )
+
+    if parsed_time:
+        try:
+            return datetime(
+                parsed_time.tm_year,
+                parsed_time.tm_mon,
+                parsed_time.tm_mday,
+                parsed_time.tm_hour,
+                parsed_time.tm_min,
+                parsed_time.tm_sec,
+                tzinfo=ZoneInfo("UTC"),
+            ).astimezone(SINGAPORE_TZ)
+        except (TypeError, ValueError):
+            pass
+
+    raw_date = str(
+        entry.get("published")
+        or entry.get("updated")
+        or ""
+    ).strip()
+
+    if not raw_date:
+        return None
+
+    try:
+        parsed = parsedate_to_datetime(raw_date)
+
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=ZoneInfo("UTC"))
+
+        return parsed.astimezone(SINGAPORE_TZ)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _extract_news_image(entry: Any) -> str:
+    """
+    Attempt to retrieve an image supplied inside the RSS item.
+    """
+    media_content = entry.get("media_content") or []
+
+    if isinstance(media_content, list):
+        for media in media_content:
+            if not isinstance(media, dict):
+                continue
+
+            url = str(media.get("url") or "").strip()
+            medium = str(media.get("medium") or "").lower()
+
+            if url and medium in {"", "image"}:
+                return url
+
+    media_thumbnail = entry.get("media_thumbnail") or []
+
+    if isinstance(media_thumbnail, list):
+        for thumbnail in media_thumbnail:
+            if not isinstance(thumbnail, dict):
+                continue
+
+            url = str(thumbnail.get("url") or "").strip()
+            if url:
+                return url
+
+    enclosures = entry.get("enclosures") or []
+
+    if isinstance(enclosures, list):
+        for enclosure in enclosures:
+            if not isinstance(enclosure, dict):
+                continue
+
+            enclosure_type = str(
+                enclosure.get("type") or ""
+            ).lower()
+
+            url = str(enclosure.get("href") or "").strip()
+
+            if url and enclosure_type.startswith("image/"):
+                return url
+
+    return ""
+
+
+def _news_importance_score(
+    title: str,
+    summary: str,
+    *,
+    region: str,
+    published_at: datetime | None,
+    feed_position: int,
+) -> tuple[float, list[str]]:
+    """
+    Produce a simple editorial importance score.
+
+    This is not a factual assessment of importance. It is a ranking
+    heuristic based on:
+    - keywords
+    - recency
+    - location relevance
+    - RSS feed position
+    """
+    searchable_text = f"{title} {summary}".lower()
+    score = 0.0
+    reasons: list[str] = []
+
+    matched_keywords: list[str] = []
+
+    for keyword, keyword_score in NEWS_IMPORTANCE_KEYWORDS.items():
+        if keyword in searchable_text:
+            score += keyword_score
+            matched_keywords.append(keyword)
+
+    if matched_keywords:
+        reasons.append(
+            "Keywords: " + ", ".join(matched_keywords[:5])
+        )
+
+    # Give a small advantage to earlier items in the publisher's RSS feed.
+    feed_position_bonus = max(0, 10 - feed_position) * 0.4
+    score += feed_position_bonus
+
+    if feed_position_bonus > 0:
+        reasons.append("High RSS feed position")
+
+    # Singapore relevance matters more in the Singapore section.
+    if region == "singapore":
+        score += 3
+        reasons.append("Singapore section")
+
+    # Recency remains part of importance, but does not determine it alone.
+    if published_at is not None:
+        age_hours = max(
+            0,
+            (
+                datetime.now(SINGAPORE_TZ) - published_at
+            ).total_seconds() / 3600,
+        )
+
+        if age_hours <= 2:
+            score += 6
+            reasons.append("Published within 2 hours")
+        elif age_hours <= 6:
+            score += 4
+            reasons.append("Published within 6 hours")
+        elif age_hours <= 12:
+            score += 2
+            reasons.append("Published within 12 hours")
+        elif age_hours <= 24:
+            score += 1
+
+    return round(score, 2), reasons
+
+
+def _normalize_news_entry(
+    entry: Any,
+    *,
+    region: str,
+    feed_position: int,
+) -> dict[str, Any]:
+    title = _strip_html(entry.get("title"))
+    summary = _strip_html(
+        entry.get("summary")
+        or entry.get("description")
+    )
+
+    link = str(entry.get("link") or "").strip()
+    published_at = _parse_news_datetime(entry)
+
+    importance_score, importance_reasons = (
+        _news_importance_score(
+            title,
+            summary,
+            region=region,
+            published_at=published_at,
+            feed_position=feed_position,
+        )
+    )
+
+    article_id_source = (
+        str(entry.get("id") or "").strip()
+        or link
+        or f"{region}:{title}"
+    )
+
+    article_id = hashlib.sha256(
+        article_id_source.encode("utf-8")
+    ).hexdigest()[:24]
+
+    return {
+        "id": article_id,
+        "title": title,
+        "summary": summary,
+        "url": link,
+        "imageUrl": _extract_news_image(entry),
+        "source": "CNA",
+        "sourceDomain": (
+            urlparse(link).netloc
+            if link
+            else "channelnewsasia.com"
+        ),
+        "region": region,
+        "publishedAt": (
+            published_at.isoformat()
+            if published_at
+            else None
+        ),
+        "importanceScore": importance_score,
+        "importanceReasons": importance_reasons,
+        "feedPosition": feed_position,
+    }
+
+
+@lru_cache(maxsize=16)
+def _fetch_cna_feed_cached(
+    region: str,
+    cache_window: int,
+) -> tuple[dict[str, Any], ...]:
+    """
+    cache_window changes every NEWS_CACHE_SECONDS, causing the
+    lru_cache result to refresh automatically.
+    """
+    feed_url = CNA_RSS_FEEDS.get(region)
+
+    if not feed_url:
+        raise ValueError("Unknown news region")
+
+    response = requests.get(
+        feed_url,
+        timeout=NEWS_REQUEST_TIMEOUT_SECONDS,
+        headers={
+            "User-Agent": (
+                "The-Nowl-All-In-One/1.0 "
+                "(personal RSS reader)"
+            ),
+            "Accept": (
+                "application/rss+xml, "
+                "application/xml, text/xml"
+            ),
+        },
+    )
+    response.raise_for_status()
+
+    parsed_feed = feedparser.parse(response.content)
+
+    if parsed_feed.bozo and not parsed_feed.entries:
+        raise RuntimeError(
+            f"Could not parse CNA {region} RSS feed"
+        )
+
+    articles = tuple(
+        _normalize_news_entry(
+            entry,
+            region=region,
+            feed_position=index,
+        )
+        for index, entry in enumerate(parsed_feed.entries)
+    )
+
+    return articles
+
+
+def _fetch_cna_feed(region: str) -> list[dict[str, Any]]:
+    cache_window = int(
+        datetime.now().timestamp()
+        // NEWS_CACHE_SECONDS
+    )
+
+    return [
+        dict(article)
+        for article in _fetch_cna_feed_cached(
+            region,
+            cache_window,
+        )
+    ]
+
+
+def _sort_news_articles(
+    articles: list[dict[str, Any]],
+    sort_method: str,
+) -> list[dict[str, Any]]:
+    if sort_method == "importance":
+        return sorted(
+            articles,
+            key=lambda article: (
+                -float(article.get("importanceScore", 0)),
+                str(article.get("publishedAt") or ""),
+            ),
+            reverse=False,
+        )
+
+    return sorted(
+        articles,
+        key=lambda article: str(
+            article.get("publishedAt") or ""
+        ),
+        reverse=True,
+    )
+
+
+def _deduplicate_news_articles(
+    articles: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    unique_articles: list[dict[str, Any]] = []
+    seen_urls: set[str] = set()
+    seen_titles: set[str] = set()
+
+    for article in articles:
+        url = str(article.get("url") or "").strip()
+        normalized_title = re.sub(
+            r"[^a-z0-9]+",
+            " ",
+            str(article.get("title") or "").lower(),
+        ).strip()
+
+        if url and url in seen_urls:
+            continue
+
+        if normalized_title and normalized_title in seen_titles:
+            continue
+
+        if url:
+            seen_urls.add(url)
+
+        if normalized_title:
+            seen_titles.add(normalized_title)
+
+        unique_articles.append(article)
+
+    return unique_articles
+
+
+def _require_huggingface_configuration():
+    if not HF_TOKEN:
+        return jsonify({
+            "error": "AI news summaries are not configured",
+            "missing": ["HF_TOKEN"],
+        }), 503
+
+    if not HF_NEWS_MODEL:
+        return jsonify({
+            "error": "AI news model is not configured",
+            "missing": ["HF_NEWS_MODEL"],
+        }), 503
+
+    return None
+
+
+def _articles_from_last_hours(
+    articles: list[dict[str, Any]],
+    hours: int,
+) -> list[dict[str, Any]]:
+    """
+    Keep only articles published during the requested time window.
+    All stored article dates have already been converted to Singapore time.
+    """
+    cutoff = datetime.now(SINGAPORE_TZ) - timedelta(hours=hours)
+    recent_articles: list[dict[str, Any]] = []
+
+    for article in articles:
+        published_at = _parse_stored_datetime(
+            article.get("publishedAt")
+        )
+
+        if published_at is None:
+            continue
+
+        if published_at >= cutoff:
+            recent_articles.append(article)
+
+    return recent_articles
+
+
+def _normalize_client_news_articles(
+    value: Any,
+    *,
+    default_region: str,
+) -> list[dict[str, Any]]:
+    """
+    Validate and normalize articles supplied by the frontend.
+
+    The frontend may send the articles already displayed to the user. This
+    prevents the summary endpoint from silently summarising a different RSS
+    snapshot and makes the request payload self-contained.
+    """
+    if not isinstance(value, list):
+        return []
+
+    normalized: list[dict[str, Any]] = []
+
+    for index, raw_article in enumerate(value):
+        if not isinstance(raw_article, dict):
+            continue
+
+        title = _strip_html(raw_article.get("title"))
+        summary = _strip_html(
+            raw_article.get("summary")
+            or raw_article.get("publisherSummary")
+            or raw_article.get("description")
+        )
+        url = str(raw_article.get("url")
+                  or raw_article.get("link") or "").strip()
+
+        if not title:
+            continue
+
+        published_at = _parse_stored_datetime(
+            raw_article.get("publishedAt")
+            or raw_article.get("published_at")
+            or raw_article.get("published")
+        )
+
+        article_id = str(
+            raw_article.get("id")
+            or raw_article.get("articleId")
+            or ""
+        ).strip()
+
+        if not article_id:
+            article_id_source = url or f"{default_region}:{title}:{index}"
+            article_id = hashlib.sha256(
+                article_id_source.encode("utf-8")
+            ).hexdigest()[:24]
+
+        try:
+            importance_score = float(
+                raw_article.get("importanceScore") or 0
+            )
+        except (TypeError, ValueError):
+            importance_score = 0.0
+
+        normalized.append({
+            "id": article_id,
+            "title": title,
+            "summary": summary,
+            "url": url,
+            "imageUrl": str(raw_article.get("imageUrl") or "").strip(),
+            "source": str(raw_article.get("source") or "CNA").strip() or "CNA",
+            "sourceDomain": str(
+                raw_article.get("sourceDomain")
+                or (urlparse(url).netloc if url else "")
+            ).strip(),
+            "region": _normalize_news_region(
+                raw_article.get("region") or default_region
+            ),
+            "publishedAt": published_at.isoformat() if published_at else None,
+            "importanceScore": importance_score,
+            "importanceReasons": _normalize_string_list(
+                raw_article.get("importanceReasons")
+            ),
+            "feedPosition": int(raw_article.get("feedPosition") or index),
+        })
+
+    return _deduplicate_news_articles(normalized)
+
+
+def _prepare_articles_for_ai(
+    articles: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """
+    Only send fields that are useful for summarisation.
+
+    This keeps the prompt smaller and prevents unnecessary data from being
+    sent to the model.
+    """
+    prepared: list[dict[str, Any]] = []
+
+    for index, article in enumerate(articles, start=1):
+        prepared.append({
+            "articleNumber": index,
+            "id": str(article.get("id") or ""),
+            "title": str(article.get("title") or ""),
+            "publisherSummary": str(
+                article.get("summary") or ""
+            ),
+            "publishedAt": article.get("publishedAt"),
+            "source": str(article.get("source") or "CNA"),
+            "url": str(article.get("url") or ""),
+            "importanceScore": float(
+                article.get("importanceScore") or 0
+            ),
+        })
+
+    return prepared
+
+
+def _build_article_tldr_prompt(
+    articles: list[dict[str, Any]],
+    scope: str,
+) -> str:
+    """Build a compact prompt that asks for one TLDR per input article."""
+    scope_description = (
+        "Singapore"
+        if scope == "singapore"
+        else "global"
+    )
+
+    article_json = json.dumps(
+        articles,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+    return f"""
+Create one concise TLDR for every supplied {scope_description} news article.
+
+Use only the supplied article information. Do not invent facts. Preserve
+uncertainty, allegations, predictions and future plans as uncertainty rather
+than presenting them as confirmed events.
+
+Return exactly one valid JSON object and no Markdown or commentary:
+
+{{
+  "articles": [
+    {{
+      "id": "the exact supplied article id",
+      "tldr": "one or two concise sentences explaining the article",
+      "importance": "one short sentence explaining why it matters"
+    }}
+  ]
+}}
+
+Rules:
+1. Return exactly one item for every supplied article.
+2. Keep each TLDR below 70 words.
+3. Keep each importance sentence below 30 words.
+4. Copy each supplied id exactly.
+5. Do not combine different articles.
+6. Ensure all JSON braces and brackets are closed.
+
+Articles:
+{article_json}
+""".strip()
+
+
+def _validate_article_tldr_batch(
+    value: dict[str, Any],
+    source_articles: list[dict[str, Any]],
+) -> list[dict[str, str]]:
+    """Validate a batch response and restore missing articles safely."""
+    if not isinstance(value, dict):
+        raise RuntimeError("The AI article TLDR response was not an object")
+
+    for wrapper_key in ("result", "output", "data"):
+        wrapped = value.get(wrapper_key)
+        if isinstance(wrapped, dict):
+            value = wrapped
+            break
+
+    raw_items = (
+        value.get("articles")
+        or value.get("summaries")
+        or value.get("items")
+        or []
+    )
+    if not isinstance(raw_items, list):
+        raw_items = []
+
+    source_by_id = {
+        str(article.get("id") or "").strip(): article
+        for article in source_articles
+        if str(article.get("id") or "").strip()
+    }
+
+    generated_by_id: dict[str, dict[str, str]] = {}
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+
+        article_id = str(
+            item.get("id")
+            or item.get("articleId")
+            or item.get("article_id")
+            or ""
+        ).strip()
+        if article_id not in source_by_id:
+            continue
+
+        tldr = str(
+            item.get("tldr")
+            or item.get("summary")
+            or item.get("overview")
+            or item.get("description")
+            or ""
+        ).strip()
+        importance = str(
+            item.get("importance")
+            or item.get("whyItMatters")
+            or item.get("why_it_matters")
+            or item.get("significance")
+            or ""
+        ).strip()
+
+        if tldr:
+            generated_by_id[article_id] = {
+                "id": article_id,
+                "tldr": tldr[:1200],
+                "importance": importance[:500],
+            }
+
+    validated: list[dict[str, str]] = []
+    for article in source_articles:
+        article_id = str(article.get("id") or "").strip()
+        generated = generated_by_id.get(article_id)
+
+        if generated:
+            validated.append(generated)
+            continue
+
+        # A publisher summary is a truthful fallback when one item is omitted
+        # or a provider returns partially malformed JSON.
+        fallback = str(
+            article.get("publisherSummary")
+            or article.get("summary")
+            or article.get("title")
+            or "Summary unavailable."
+        ).strip()
+
+        validated.append({
+            "id": article_id,
+            "tldr": fallback[:1200],
+            "importance": "",
+        })
+
+    return validated
+
+
+def _merge_usage(
+    total: dict[str, Any],
+    current: dict[str, Any],
+) -> None:
+    """Accumulate numeric usage fields across batch requests."""
+    for key, value in current.items():
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            total[key] = total.get(key, 0) + value
+
+
+def _call_article_tldr_batch(
+    articles: list[dict[str, Any]],
+    scope: str,
+) -> tuple[list[dict[str, str]], dict[str, Any]]:
+    prompt = _build_article_tldr_prompt(articles, scope)
+
+    request_body = {
+        "model": HF_NEWS_MODEL,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You are a careful news editor. Summarise only the "
+                    "supplied article metadata. Return exactly one valid "
+                    "JSON object with one TLDR for every article."
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.1,
+        "max_tokens": NEWS_SUMMARY_MAX_OUTPUT_TOKENS,
+        "response_format": {"type": "json_object"},
+        "stream": False,
+    }
+
+    response = _post_huggingface_chat(request_body)
+
+    if response.status_code == 401:
+        raise PermissionError(
+            "The Hugging Face token is invalid or lacks "
+            "Inference Providers permission"
+        )
+    if response.status_code == 402:
+        raise RuntimeError(
+            "The Hugging Face account has insufficient inference credits"
+        )
+    if response.status_code == 429:
+        raise RuntimeError(
+            "The AI summary service is currently rate limited"
+        )
+    if response.status_code >= 400:
+        app.logger.error(
+            "Hugging Face inference failed with status %s: %s",
+            response.status_code,
+            response.text[:2000],
+        )
+        raise RuntimeError(
+            "The AI provider could not generate the news summary"
+        )
+
+    try:
+        response_payload = response.json()
+    except requests.exceptions.JSONDecodeError as error:
+        raise RuntimeError(
+            "The AI provider returned an unreadable response"
+        ) from error
+
+    choices = response_payload.get("choices")
+    if isinstance(choices, list) and choices:
+        finish_reason = str(
+            choices[0].get("finish_reason") or ""
+        ).strip().lower()
+        if finish_reason in {"length", "max_tokens", "token_limit"}:
+            raise RuntimeError(
+                "The AI article TLDR batch was cut off before completion"
+            )
+
+    content = _extract_ai_message_content(response_payload)
+    try:
+        parsed = _parse_ai_json_response(content)
+        summaries = _validate_article_tldr_batch(parsed, articles)
+    except RuntimeError:
+        app.logger.error(
+            "Invalid AI article TLDR content: %r",
+            content[:5000],
+        )
+        raise
+
+    usage = response_payload.get("usage")
+    if not isinstance(usage, dict):
+        usage = {}
+
+    return summaries, usage
+
+
+def _generate_all_article_tldrs(
+    articles: list[dict[str, Any]],
+    scope: str,
+) -> tuple[list[dict[str, str]], dict[str, Any], int]:
+    """Generate per-article TLDRs in small requests to avoid truncation."""
+    all_summaries: list[dict[str, str]] = []
+    total_usage: dict[str, Any] = {}
+    batch_count = 0
+
+    for start in range(0, len(articles), NEWS_SUMMARY_BATCH_SIZE):
+        batch = articles[start:start + NEWS_SUMMARY_BATCH_SIZE]
+        summaries, usage = _call_article_tldr_batch(batch, scope)
+        all_summaries.extend(summaries)
+        _merge_usage(total_usage, usage)
+        batch_count += 1
+
+    return all_summaries, total_usage, batch_count
+
+
+def _article_tldrs_to_summary(
+    selected_articles: list[dict[str, Any]],
+    tldrs: list[dict[str, str]],
+    scope: str,
+) -> dict[str, Any]:
+    """Convert per-article TLDRs into the shape used by the existing UI."""
+    tldr_by_id = {
+        str(item.get("id") or ""): item
+        for item in tldrs
+    }
+
+    events: list[dict[str, Any]] = []
+    for article in selected_articles:
+        article_id = str(article.get("id") or "")
+        generated = tldr_by_id.get(article_id, {})
+        source_name = str(article.get("source") or "CNA").strip() or "CNA"
+        url = str(article.get("url") or "").strip()
+
+        sources = []
+        if url.startswith(("http://", "https://")):
+            sources.append({"name": source_name, "url": url})
+
+        events.append({
+            "title": str(article.get("title") or "Untitled article").strip(),
+            "summary": str(generated.get("tldr") or "").strip(),
+            "importance": str(generated.get("importance") or "").strip(),
+            "articleIds": [article_id] if article_id else [],
+            "sources": sources,
+            "publishedAt": article.get("publishedAt"),
+            "imageUrl": str(article.get("imageUrl") or ""),
+            "url": url,
+        })
+
+    scope_name = "Singapore" if scope == "singapore" else "Global"
+    return {
+        "headline": f"{scope_name} news from the past 24 hours",
+        "overview": (
+            f"TLDRs for all {len(events)} articles published in the selected "
+            "news feed during the past 24 hours."
+        ),
+        "events": events,
+        "developingStories": [],
+    }
+
+
+def _build_news_summary_prompt(
+    articles: list[dict[str, Any]],
+    scope: str,
+) -> str:
+    scope_description = (
+        "Singapore"
+        if scope == "singapore"
+        else "the world"
+    )
+
+    article_json = json.dumps(
+        articles,
+        ensure_ascii=False,
+        indent=2,
+    )
+
+    return f"""
+Create a concise news TLDR covering the most important events in
+{scope_description} during the past 24 hours.
+
+You must use only the supplied article information.
+
+Important rules:
+1. Do not add facts that are not contained in the supplied articles.
+2. Do not claim an event happened merely because an article discusses a
+   prediction, opinion, allegation, possibility, or upcoming event.
+3. Combine articles that describe the same event.
+4. Prioritise public impact, safety, government decisions, international
+   significance, economic consequences and major disruptions.
+5. Ignore lifestyle, entertainment and minor human-interest stories unless
+   they are genuinely among the most consequential events supplied.
+6. Clearly distinguish confirmed facts from allegations or developing reports.
+7. Keep each event understandable to someone who has not read the articles.
+8. Return valid JSON only. Do not wrap the JSON in Markdown fences.
+
+Use this exact JSON structure:
+
+{{
+  "headline": "One-sentence overview of the past 24 hours",
+  "overview": "A short paragraph of no more than 100 words",
+  "events": [
+    {{
+      "title": "Short event title",
+      "summary": "Two or three concise sentences explaining what happened and why it matters",
+      "importance": "One concise sentence explaining its significance",
+      "articleIds": ["ID of supporting article"],
+      "sources": [
+        {{
+          "name": "Publisher name",
+          "url": "Article URL"
+        }}
+      ]
+    }}
+  ],
+  "developingStories": [
+    "Optional concise description of a story that remains uncertain or developing"
+  ]
+}}
+
+Include no more than 7 events.
+Use an empty developingStories array when there are none.
+
+Articles:
+
+{article_json}
+""".strip()
+
+
+def _extract_ai_message_content(
+    response_payload: dict[str, Any],
+) -> str:
+    """Extract text from an OpenAI-compatible chat completion response."""
+    try:
+        choices = response_payload.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise ValueError("No completion choices were returned")
+
+        first_choice = choices[0]
+        if not isinstance(first_choice, dict):
+            raise ValueError("The completion choice was invalid")
+
+        message = first_choice.get("message")
+        if not isinstance(message, dict):
+            raise ValueError("The completion message was invalid")
+
+        content = message.get("content")
+        text_parts: list[str] = []
+
+        if isinstance(content, str):
+            text_parts.append(content)
+        elif isinstance(content, list):
+            for part in content:
+                if isinstance(part, str):
+                    text_parts.append(part)
+                elif isinstance(part, dict):
+                    part_text = part.get("text") or part.get("content")
+                    if isinstance(part_text, str):
+                        text_parts.append(part_text)
+
+        # Some reasoning-model providers return the final answer in a
+        # provider-specific field rather than message.content.
+        if not any(part.strip() for part in text_parts):
+            for field_name in (
+                "final",
+                "final_answer",
+                "answer",
+                "output_text",
+            ):
+                value = message.get(field_name)
+                if isinstance(value, str) and value.strip():
+                    text_parts.append(value)
+                    break
+
+        final_content = "\n".join(text_parts).strip()
+        if not final_content:
+            raise ValueError("The model returned an empty response")
+
+        return final_content
+
+    except (TypeError, ValueError) as error:
+        app.logger.error(
+            "Unexpected Hugging Face response: %r",
+            response_payload,
+        )
+        raise RuntimeError(
+            "The AI provider returned an unexpected response"
+        ) from error
+
+
+def _parse_ai_json_response(content: str) -> dict[str, Any]:
+    """Parse the first complete JSON object found in a model response."""
+    if not isinstance(content, str) or not content.strip():
+        raise RuntimeError("The AI returned an empty summary")
+
+    cleaned = content.strip().lstrip("\ufeff")
+    cleaned = re.sub(
+        r"<think>.*?</think>",
+        "",
+        cleaned,
+        flags=re.IGNORECASE | re.DOTALL,
+    ).strip()
+    cleaned = re.sub(
+        r"```(?:json)?\s*",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = cleaned.replace("```", "").strip()
+
+    try:
+        parsed = json.loads(cleaned)
+    except json.JSONDecodeError:
+        parsed = None
+
+    if parsed is None:
+        decoder = json.JSONDecoder()
+        parse_error: json.JSONDecodeError | None = None
+
+        # Try every opening brace. This avoids failing when explanatory text
+        # contains braces before the actual JSON response.
+        for match in re.finditer(r"\{", cleaned):
+            try:
+                candidate, consumed_length = decoder.raw_decode(
+                    cleaned[match.start():]
+                )
+            except json.JSONDecodeError as error:
+                parse_error = error
+                continue
+
+            if isinstance(candidate, dict):
+                parsed = candidate
+                trailing = cleaned[
+                    match.start() + consumed_length:
+                ].strip()
+                if trailing:
+                    app.logger.warning(
+                        "Ignored text after AI summary JSON: %r",
+                        trailing[:1000],
+                    )
+                break
+
+        if parsed is None:
+            app.logger.error(
+                "Could not parse AI summary JSON. Raw response: %r",
+                cleaned[:5000],
+            )
+            raise RuntimeError(
+                "The AI generated an invalid summary format"
+            ) from parse_error
+
+    if not isinstance(parsed, dict):
+        raise RuntimeError(
+            "The AI summary was not returned as an object"
+        )
+
+    return parsed
+
+
+def _post_huggingface_chat(
+    request_body: dict[str, Any],
+) -> requests.Response:
+    """Call Hugging Face, retrying without JSON mode if unsupported."""
+    response = requests.post(
+        HF_NEWS_API_URL,
+        headers={
+            "Authorization": f"Bearer {HF_TOKEN}",
+            "Content-Type": "application/json",
+        },
+        json=request_body,
+        timeout=HF_NEWS_TIMEOUT_SECONDS,
+    )
+
+    # Provider implementations vary. Featherless may reject response_format
+    # even though the router accepts OpenAI-compatible requests generally.
+    if response.status_code in {400, 422} and "response_format" in request_body:
+        app.logger.warning(
+            "Provider rejected JSON response_format; retrying without it: %s",
+            response.text[:1000],
+        )
+        fallback_body = dict(request_body)
+        fallback_body.pop("response_format", None)
+        response = requests.post(
+            HF_NEWS_API_URL,
+            headers={
+                "Authorization": f"Bearer {HF_TOKEN}",
+                "Content-Type": "application/json",
+            },
+            json=fallback_body,
+            timeout=HF_NEWS_TIMEOUT_SECONDS,
+        )
+
+    return response
+
+
+def _call_news_summary_model(
+    articles: list[dict[str, Any]],
+    scope: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    prompt = _build_news_summary_prompt(articles, scope)
+
+    request_body = {
+        "model": HF_NEWS_MODEL,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You are a careful news editor. Summarise only the "
+                    "supplied source material. Avoid speculation. Return "
+                    "exactly one valid JSON object matching the requested "
+                    "structure, with no reasoning or commentary outside it."
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.1,
+        "max_tokens": NEWS_SUMMARY_MAX_OUTPUT_TOKENS,
+        "response_format": {"type": "json_object"},
+        "stream": False,
+    }
+
+    response = _post_huggingface_chat(request_body)
+
+    if response.status_code == 401:
+        raise PermissionError(
+            "The Hugging Face token is invalid or lacks "
+            "Inference Providers permission"
+        )
+    if response.status_code == 402:
+        raise RuntimeError(
+            "The Hugging Face account has insufficient inference credits"
+        )
+    if response.status_code == 429:
+        raise RuntimeError(
+            "The AI summary service is currently rate limited"
+        )
+    if response.status_code >= 400:
+        app.logger.error(
+            "Hugging Face inference failed with status %s: %s",
+            response.status_code,
+            response.text[:2000],
+        )
+        raise RuntimeError(
+            "The AI provider could not generate the news summary"
+        )
+
+    try:
+        response_payload = response.json()
+    except requests.exceptions.JSONDecodeError as error:
+        app.logger.error(
+            "Hugging Face returned non-JSON content: %r",
+            response.text[:3000],
+        )
+        raise RuntimeError(
+            "The AI provider returned an unreadable response"
+        ) from error
+
+    if app.debug:
+        app.logger.debug(
+            "Hugging Face response keys: %s",
+            list(response_payload.keys()),
+        )
+        choices = response_payload.get("choices")
+        if isinstance(choices, list) and choices:
+            message = choices[0].get("message", {})
+            app.logger.debug(
+                "Hugging Face message keys: %s",
+                list(message.keys()) if isinstance(message, dict) else [],
+            )
+
+    choices = response_payload.get("choices")
+    if isinstance(choices, list) and choices:
+        finish_reason = choices[0].get("finish_reason")
+        if finish_reason == "length":
+            raise RuntimeError(
+                "The AI summary was cut off before completion. "
+                "Reduce maxArticles and try again."
+            )
+
+    content = _extract_ai_message_content(response_payload)
+
+    try:
+        parsed_summary = _parse_ai_json_response(content)
+        summary = _validate_news_summary(parsed_summary)
+    except RuntimeError:
+        app.logger.error(
+            "Invalid AI news summary content: %r",
+            content[:5000],
+        )
+        raise
+
+    usage = response_payload.get("usage")
+    if not isinstance(usage, dict):
+        usage = {}
+
+    return summary, usage
+
+
+def _validate_news_summary(
+    summary: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Validate and normalize the model response.
+
+    Some providers return the requested object under keys such as "summary",
+    "result", or "output". Others use slightly different field names. Accept
+    those harmless variations while still enforcing a safe final structure.
+    """
+    if not isinstance(summary, dict):
+        raise RuntimeError("The AI summary was not returned as an object")
+
+    for wrapper_key in ("summary", "result", "output", "data"):
+        wrapped = summary.get(wrapper_key)
+        if isinstance(wrapped, dict):
+            summary = wrapped
+            break
+
+    headline = str(
+        summary.get("headline")
+        or summary.get("title")
+        or summary.get("topHeadline")
+        or summary.get("top_headline")
+        or ""
+    ).strip()
+
+    overview = str(
+        summary.get("overview")
+        or summary.get("tldr")
+        or summary.get("summary")
+        or summary.get("description")
+        or ""
+    ).strip()
+
+    raw_events = (
+        summary.get("events")
+        or summary.get("stories")
+        or summary.get("keyEvents")
+        or summary.get("key_events")
+        or []
+    )
+
+    raw_developing = (
+        summary.get("developingStories")
+        or summary.get("developing_stories")
+        or summary.get("developing")
+        or []
+    )
+
+    if not isinstance(raw_events, list):
+        raw_events = []
+
+    if not isinstance(raw_developing, list):
+        raw_developing = []
+
+    validated_events: list[dict[str, Any]] = []
+
+    for event in raw_events[:7]:
+        if not isinstance(event, dict):
+            continue
+
+        title = str(
+            event.get("title")
+            or event.get("headline")
+            or event.get("name")
+            or ""
+        ).strip()
+
+        event_summary = str(
+            event.get("summary")
+            or event.get("overview")
+            or event.get("description")
+            or event.get("details")
+            or ""
+        ).strip()
+
+        importance = str(
+            event.get("importance")
+            or event.get("significance")
+            or event.get("whyItMatters")
+            or event.get("why_it_matters")
+            or ""
+        ).strip()
+
+        if not title or not event_summary:
+            continue
+
+        article_ids = (
+            event.get("articleIds")
+            or event.get("article_ids")
+            or event.get("supportingArticleIds")
+            or []
+        )
+        if not isinstance(article_ids, list):
+            article_ids = []
+
+        sources = event.get("sources") or []
+        if not isinstance(sources, list):
+            sources = []
+
+        clean_sources: list[dict[str, str]] = []
+
+        for source in sources:
+            if isinstance(source, str):
+                if source.startswith(("http://", "https://")):
+                    clean_sources.append({
+                        "name": urlparse(source).netloc or "Source",
+                        "url": source,
+                    })
+                continue
+
+            if not isinstance(source, dict):
+                continue
+
+            name = str(
+                source.get("name")
+                or source.get("source")
+                or source.get("publisher")
+                or ""
+            ).strip()
+            url = str(
+                source.get("url")
+                or source.get("link")
+                or ""
+            ).strip()
+
+            if url.startswith(("http://", "https://")):
+                clean_sources.append({
+                    "name": name or urlparse(url).netloc or "Source",
+                    "url": url,
+                })
+
+        validated_events.append({
+            "title": title,
+            "summary": event_summary,
+            "importance": importance,
+            "articleIds": [
+                str(article_id).strip()
+                for article_id in article_ids
+                if str(article_id).strip()
+            ],
+            "sources": clean_sources,
+        })
+
+    if not validated_events:
+        raise RuntimeError(
+            "The AI summary did not contain any valid events"
+        )
+
+    # Avoid failing the whole request when the provider omitted only the
+    # headline or overview. Derive conservative fallbacks from valid events.
+    if not headline:
+        headline = validated_events[0]["title"]
+
+    if not overview:
+        overview = " ".join(
+            event["summary"] for event in validated_events[:2]
+        )[:800].strip()
+
+    return {
+        "headline": headline,
+        "overview": overview,
+        "events": validated_events,
+        "developingStories": [
+            str(story).strip()
+            for story in raw_developing
+            if str(story).strip()
+        ],
+    }
+
+
+NEWS_REGIONS = frozenset({"singapore", "global", "world", "asia", "latest"})
+NEWS_SORT_METHODS = frozenset({"time", "importance"})
+NEWS_COMMENT_VISIBILITIES = frozenset({"private", "public"})
+NEWS_MAX_TAGS = 20
+NEWS_MAX_TAG_LENGTH = 40
+NEWS_MAX_COMMENT_LENGTH = 4000
+
+
+def _normalize_news_region(value: Any) -> str:
+    region = str(value or "singapore").strip().lower()
+    if region == "global":
+        return "world"
+    return region
+
+
+def _normalize_news_tags(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+
+    tags: list[str] = []
+    seen: set[str] = set()
+
+    for raw_tag in value:
+        tag = re.sub(r"\s+", " ", str(raw_tag or "").strip())
+        normalized = tag.lower()
+
+        if (
+            not tag
+            or len(tag) > NEWS_MAX_TAG_LENGTH
+            or normalized in seen
+        ):
+            continue
+
+        tags.append(tag)
+        seen.add(normalized)
+
+        if len(tags) >= NEWS_MAX_TAGS:
+            break
+
+    return tags
+
+
+def _news_saved_article_id(uid: str, article_id: str) -> str:
+    return hashlib.sha256(
+        f"{uid}:{article_id}".encode("utf-8")
+    ).hexdigest()
+
+
+def _news_article_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
+    article_id = str(payload.get("id") or "").strip()
+    title = _strip_html(payload.get("title"))
+    url = str(payload.get("url") or "").strip()
+
+    if not article_id:
+        raise ValueError("Article id is required")
+    if not title:
+        raise ValueError("Article title is required")
+    if not url.startswith(("https://", "http://")):
+        raise ValueError("A valid article URL is required")
+
+    return {
+        "articleId": article_id,
+        "title": title[:500],
+        "summary": _strip_html(payload.get("summary"))[:3000],
+        "url": url,
+        "imageUrl": str(payload.get("imageUrl") or "").strip(),
+        "source": str(payload.get("source") or "CNA").strip()[:100],
+        "sourceDomain": str(payload.get("sourceDomain") or "").strip()[:200],
+        "region": _normalize_news_region(payload.get("region")),
+        "publishedAt": payload.get("publishedAt"),
+        "importanceScore": float(payload.get("importanceScore") or 0),
+        "importanceReasons": _normalize_string_list(
+            payload.get("importanceReasons")
+        )[:10],
+    }
+
+
+def _saved_news_response(
+    document_id: str,
+    saved: dict[str, Any],
+) -> dict[str, Any]:
+    article = saved.get("article") if isinstance(
+        saved.get("article"), dict
+    ) else {}
+
+    return {
+        "id": document_id,
+        "articleId": saved.get("articleId") or article.get("articleId"),
+        "article": article,
+        "tags": _normalize_news_tags(saved.get("tags")),
+        "savedAt": saved.get("savedAt"),
+        "updatedAt": saved.get("updatedAt"),
+    }
+
+
+def _news_comment_response(
+    comment_id: str,
+    comment: dict[str, Any],
+    viewer_uid: str,
+) -> dict[str, Any]:
+    owner_id = str(comment.get("ownerId") or "")
+
+    return {
+        "id": comment_id,
+        "articleId": comment.get("articleId"),
+        "text": str(comment.get("text") or ""),
+        "visibility": comment.get("visibility"),
+        "ownerId": owner_id,
+        "ownerDisplayName": comment.get("ownerDisplayName") or "User",
+        "ownerProfilePicLink": comment.get("ownerProfilePicLink") or "",
+        "isOwner": owner_id == viewer_uid,
+        "createdAt": comment.get("createdAt"),
+        "updatedAt": comment.get("updatedAt"),
+    }
+
+
+@app.get("/api/news")
+def get_news_articles():
+    """
+    Query parameters:
+      region=singapore|global|world|asia|latest
+      sort=time|importance
+      limit=1..100
+      offset=0..n
+      q=free text search
+      keywords=comma,separated,keywords
+    """
+    region = _normalize_news_region(request.args.get("region"))
+    sort_method = str(
+        request.args.get("sort") or "time"
+    ).strip().lower()
+    limit = request.args.get("limit", default=50, type=int)
+    offset = request.args.get("offset", default=0, type=int)
+    query = str(request.args.get("q") or "").strip().lower()
+    keywords = [
+        keyword.strip().lower()
+        for keyword in str(
+            request.args.get("keywords") or ""
+        ).split(",")
+        if keyword.strip()
+    ]
+
+    if region not in CNA_RSS_FEEDS:
+        return jsonify({
+            "error": "region must be singapore, global, world, asia, or latest"
+        }), 400
+
+    if sort_method not in NEWS_SORT_METHODS:
+        return jsonify({
+            "error": "sort must be time or importance"
+        }), 400
+
+    limit = max(1, min(limit, NEWS_MAX_LIMIT))
+    offset = max(0, offset or 0)
+
+    try:
+        articles = _deduplicate_news_articles(
+            _fetch_cna_feed(region)
+        )
+    except requests.RequestException as error:
+        app.logger.exception("Could not retrieve CNA RSS: %s", error)
+        return jsonify({
+            "error": "The news provider is temporarily unavailable"
+        }), 502
+    except Exception as error:
+        app.logger.exception("Could not prepare news feed: %s", error)
+        return jsonify({"error": "Could not load news articles"}), 500
+
+    if query or keywords:
+        filtered: list[dict[str, Any]] = []
+
+        for article in articles:
+            searchable = " ".join([
+                str(article.get("title") or ""),
+                str(article.get("summary") or ""),
+                " ".join(article.get("importanceReasons") or []),
+            ]).lower()
+
+            if query and query not in searchable:
+                continue
+
+            if keywords and not all(
+                keyword in searchable
+                for keyword in keywords
+            ):
+                continue
+
+            filtered.append(article)
+
+        articles = filtered
+
+    sorted_articles = _sort_news_articles(articles, sort_method)
+    total_count = len(sorted_articles)
+    page_articles = sorted_articles[offset:offset + limit]
+    next_offset = offset + len(page_articles)
+    has_more = next_offset < total_count
+
+    return jsonify({
+        "articles": page_articles,
+        "count": len(page_articles),
+        "totalCount": total_count,
+        "offset": offset,
+        "limit": limit,
+        "nextOffset": next_offset if has_more else None,
+        "hasMore": has_more,
+        "region": "global" if region == "world" else region,
+        "sort": sort_method,
+        "query": query,
+        "keywords": keywords,
+        "source": "CNA RSS",
+        "refreshedAt": _now_iso(),
+    })
+
+
+@app.get("/api/news/headlines")
+def get_news_headlines():
+    region = _normalize_news_region(
+        request.args.get("region") or "singapore"
+    )
+    sort_method = str(
+        request.args.get("sort") or "importance"
+    ).strip().lower()
+    limit = request.args.get("limit", default=5, type=int)
+
+    if region not in CNA_RSS_FEEDS:
+        return jsonify({"error": "Invalid news region"}), 400
+    if sort_method not in NEWS_SORT_METHODS:
+        return jsonify({"error": "Invalid news sort method"}), 400
+
+    try:
+        articles = _sort_news_articles(
+            _deduplicate_news_articles(_fetch_cna_feed(region)),
+            sort_method,
+        )[:max(1, min(limit, 20))]
+    except Exception as error:
+        app.logger.exception("Could not load headline preview: %s", error)
+        return jsonify({"error": "Could not load headlines"}), 502
+
+    return jsonify({
+        "articles": articles,
+        "count": len(articles),
+        "region": "global" if region == "world" else region,
+    })
+
+
+@app.post("/api/news/summary")
+def generate_news_summary():
+    """
+    Generate one TLDR for every article from the past 24 hours.
+
+    JSON body:
+    {
+        "scope": "singapore" | "global",
+        "maxArticles": 100,
+        "articles": [...]  # optional; otherwise CNA RSS is fetched
+    }
+    """
+    identity, auth_error = _authenticated_identity()
+    if auth_error:
+        return auth_error
+
+    huggingface_error = _require_huggingface_configuration()
+    if huggingface_error:
+        return huggingface_error
+
+    payload = request.get_json(silent=True) or {}
+    scope = str(payload.get("scope") or "singapore").strip().lower()
+
+    if scope not in {"singapore", "global"}:
+        return jsonify({
+            "error": "scope must be singapore or global"
+        }), 400
+
+    try:
+        max_articles = int(
+            payload.get("maxArticles", NEWS_SUMMARY_MAX_ARTICLES)
+        )
+    except (TypeError, ValueError):
+        return jsonify({
+            "error": "maxArticles must be a whole number"
+        }), 400
+
+    max_articles = max(
+        NEWS_SUMMARY_MIN_ARTICLES,
+        min(max_articles, NEWS_SUMMARY_MAX_ARTICLES),
+    )
+
+    feed_region = "singapore" if scope == "singapore" else "world"
+    generated_at = datetime.now(SINGAPORE_TZ)
+    window_started_at = generated_at - timedelta(
+        hours=NEWS_SUMMARY_WINDOW_HOURS
+    )
+
+    client_articles = _normalize_client_news_articles(
+        payload.get("articles"),
+        default_region=feed_region,
+    )
+
+    try:
+        if client_articles:
+            articles = client_articles
+            article_source = "frontend payload"
+        else:
+            articles = _deduplicate_news_articles(
+                _fetch_cna_feed(feed_region)
+            )
+            article_source = "CNA RSS"
+
+        recent_articles = _articles_from_last_hours(
+            articles,
+            NEWS_SUMMARY_WINDOW_HOURS,
+        )
+
+        # Keep undated client articles because the frontend may omit dates.
+        if client_articles:
+            recent_articles = _deduplicate_news_articles(
+                recent_articles
+                + [
+                    article
+                    for article in articles
+                    if not article.get("publishedAt")
+                ]
+            )
+
+        # Newest first. Every selected article is summarised, not merely the
+        # highest-scoring stories.
+        selected_articles = _sort_news_articles(
+            recent_articles,
+            "time",
+        )[:max_articles]
+
+    except requests.RequestException as error:
+        app.logger.exception(
+            "Could not retrieve articles for AI summary: %s",
+            error,
+        )
+        return jsonify({
+            "error": "The news provider is temporarily unavailable"
+        }), 502
+    except Exception as error:
+        app.logger.exception(
+            "Could not prepare articles for AI summary: %s",
+            error,
+        )
+        return jsonify({
+            "error": "Could not prepare the news summary"
+        }), 500
+
+    if not selected_articles:
+        return jsonify({
+            "error": "No articles from the past 24 hours were available",
+            "scope": scope,
+            "windowStartedAt": window_started_at.isoformat(),
+            "windowEndedAt": generated_at.isoformat(),
+        }), 404
+
+    ai_articles = _prepare_articles_for_ai(selected_articles)
+
+    try:
+        tldrs, usage, batch_count = _generate_all_article_tldrs(
+            ai_articles,
+            scope,
+        )
+        summary = _article_tldrs_to_summary(
+            selected_articles,
+            tldrs,
+            scope,
+        )
+
+    except PermissionError as error:
+        app.logger.error("Hugging Face authentication failed: %s", error)
+        return jsonify({"error": str(error)}), 502
+    except requests.Timeout:
+        return jsonify({
+            "error": (
+                "The AI summary took too long to generate. "
+                "Please try again."
+            )
+        }), 504
+    except requests.RequestException as error:
+        app.logger.exception("Could not contact Hugging Face: %s", error)
+        return jsonify({
+            "error": "The AI summary service is unavailable"
+        }), 502
+    except RuntimeError as error:
+        app.logger.exception("Could not generate AI news TLDRs: %s", error)
+        return jsonify({"error": str(error)}), 502
+    except Exception as error:
+        app.logger.exception("Unexpected news summary failure: %s", error)
+        return jsonify({
+            "error": "Could not generate the news summary"
+        }), 500
+
+    return jsonify({
+        "summary": summary,
+        "scope": scope,
+        "mode": "all_articles",
+        "source": article_source,
+        "model": HF_NEWS_MODEL,
+        "articleCount": len(selected_articles),
+        "summarisedArticleCount": len(summary["events"]),
+        "batchCount": batch_count,
+        "batchSize": NEWS_SUMMARY_BATCH_SIZE,
+        "articlesConsidered": ai_articles,
+        "windowHours": NEWS_SUMMARY_WINDOW_HOURS,
+        "windowStartedAt": window_started_at.isoformat(),
+        "windowEndedAt": generated_at.isoformat(),
+        "generatedAt": generated_at.isoformat(),
+        "usage": usage,
+        "generatedForUser": identity["uid"],
+    }), 200
+
+
+@app.get("/api/news/saved")
+def get_saved_news_articles():
+    firestore_error = _require_firestore()
+    if firestore_error:
+        return firestore_error
+
+    identity, error = _authenticated_identity()
+    if error:
+        return error
+
+    results: list[dict[str, Any]] = []
+
+    try:
+        snapshots = (
+            FIRESTORE_DB.collection("newsSavedArticles")
+            .where("ownerId", "==", identity["uid"])
+            .stream()
+        )
+
+        for snapshot in snapshots:
+            saved = snapshot.to_dict() or {}
+            results.append(
+                _saved_news_response(snapshot.id, saved)
+            )
+    except Exception as database_error:
+        app.logger.exception(
+            "Could not load saved news articles: %s",
+            database_error,
+        )
+        return jsonify({
+            "error": "Could not load saved articles"
+        }), 500
+
+    results.sort(
+        key=lambda item: str(item.get("updatedAt") or ""),
+        reverse=True,
+    )
+
+    return jsonify({
+        "articles": results,
+        "count": len(results),
+    })
+
+
+@app.put("/api/news/saved/<article_id>")
+def save_news_article(article_id: str):
+    firestore_error = _require_firestore()
+    if firestore_error:
+        return firestore_error
+
+    identity, error = _authenticated_identity()
+    if error:
+        return error
+
+    payload = request.get_json(silent=True) or {}
+    article_payload = payload.get("article")
+    if not isinstance(article_payload, dict):
+        article_payload = payload
+
+    article_payload = {
+        **article_payload,
+        "id": article_id,
+    }
+
+    try:
+        article = _news_article_snapshot(article_payload)
+    except ValueError as validation_error:
+        return jsonify({"error": str(validation_error)}), 400
+
+    tags = _normalize_news_tags(payload.get("tags"))
+    document_id = _news_saved_article_id(
+        identity["uid"],
+        article_id,
+    )
+    saved_ref = _document("newsSavedArticles", document_id)
+    existing_snapshot = saved_ref.get()
+    existing = (
+        existing_snapshot.to_dict() or {}
+        if existing_snapshot.exists
+        else {}
+    )
+    now = _now_iso()
+
+    saved = {
+        "ownerId": identity["uid"],
+        "articleId": article_id,
+        "article": article,
+        "tags": tags,
+        "savedAt": existing.get("savedAt") or now,
+        "updatedAt": now,
+    }
+
+    try:
+        saved_ref.set(saved)
+    except Exception as database_error:
+        app.logger.exception(
+            "Could not save news article: %s",
+            database_error,
+        )
+        return jsonify({"error": "Could not save article"}), 500
+
+    return jsonify({
+        "message": "Article saved",
+        "savedArticle": _saved_news_response(document_id, saved),
+    }), 200 if existing else 201
+
+
+@app.patch("/api/news/saved/<article_id>")
+def update_saved_news_article(article_id: str):
+    firestore_error = _require_firestore()
+    if firestore_error:
+        return firestore_error
+
+    identity, error = _authenticated_identity()
+    if error:
+        return error
+
+    document_id = _news_saved_article_id(
+        identity["uid"],
+        article_id,
+    )
+    saved_ref = _document("newsSavedArticles", document_id)
+    snapshot = saved_ref.get()
+
+    if not snapshot.exists:
+        return jsonify({"error": "Saved article not found"}), 404
+
+    payload = request.get_json(silent=True) or {}
+    tags = _normalize_news_tags(payload.get("tags"))
+    updates = {
+        "tags": tags,
+        "updatedAt": _now_iso(),
+    }
+
+    saved_ref.set(updates, merge=True)
+    saved = {**(snapshot.to_dict() or {}), **updates}
+
+    return jsonify({
+        "message": "Saved article updated",
+        "savedArticle": _saved_news_response(document_id, saved),
+    })
+
+
+@app.delete("/api/news/saved/<article_id>")
+def delete_saved_news_article(article_id: str):
+    firestore_error = _require_firestore()
+    if firestore_error:
+        return firestore_error
+
+    identity, error = _authenticated_identity()
+    if error:
+        return error
+
+    document_id = _news_saved_article_id(
+        identity["uid"],
+        article_id,
+    )
+    saved_ref = _document("newsSavedArticles", document_id)
+    snapshot = saved_ref.get()
+
+    if not snapshot.exists:
+        return jsonify({"error": "Saved article not found"}), 404
+
+    try:
+        saved_ref.delete()
+    except Exception as database_error:
+        app.logger.exception(
+            "Could not remove saved news article: %s",
+            database_error,
+        )
+        return jsonify({
+            "error": "Could not remove saved article"
+        }), 500
+
+    return jsonify({
+        "message": "Article removed from saved items",
+        "articleId": article_id,
+    })
+
+
+@app.get("/api/news/<article_id>/comments")
+def get_news_comments(article_id: str):
+    firestore_error = _require_firestore()
+    if firestore_error:
+        return firestore_error
+
+    identity, error = _authenticated_identity()
+    if error:
+        return error
+
+    comments: list[dict[str, Any]] = []
+
+    try:
+        snapshots = (
+            FIRESTORE_DB.collection("newsComments")
+            .where("articleId", "==", article_id)
+            .stream()
+        )
+
+        for snapshot in snapshots:
+            comment = snapshot.to_dict() or {}
+            is_owner = (
+                str(comment.get("ownerId") or "")
+                == identity["uid"]
+            )
+            is_public = (
+                str(comment.get("visibility") or "")
+                == "public"
+            )
+
+            if is_owner or is_public:
+                comments.append(
+                    _news_comment_response(
+                        snapshot.id,
+                        comment,
+                        identity["uid"],
+                    )
+                )
+    except Exception as database_error:
+        app.logger.exception(
+            "Could not load news comments: %s",
+            database_error,
+        )
+        return jsonify({"error": "Could not load comments"}), 500
+
+    comments.sort(
+        key=lambda comment: str(comment.get("createdAt") or "")
+    )
+
+    return jsonify({
+        "comments": comments,
+        "count": len(comments),
+    })
+
+
+@app.post("/api/news/<article_id>/comments")
+def create_news_comment(article_id: str):
+    firestore_error = _require_firestore()
+    if firestore_error:
+        return firestore_error
+
+    identity, error = _authenticated_identity()
+    if error:
+        return error
+
+    payload = request.get_json(silent=True) or {}
+    text = str(payload.get("text") or "").strip()
+    visibility = str(
+        payload.get("visibility") or "private"
+    ).strip().lower()
+
+    if not text:
+        return jsonify({"error": "Comment text is required"}), 400
+    if len(text) > NEWS_MAX_COMMENT_LENGTH:
+        return jsonify({
+            "error": (
+                f"Comment cannot exceed "
+                f"{NEWS_MAX_COMMENT_LENGTH} characters"
+            )
+        }), 400
+    if visibility not in NEWS_COMMENT_VISIBILITIES:
+        return jsonify({
+            "error": "visibility must be private or public"
+        }), 400
+
+    user = _get_or_create_user(
+        identity["uid"],
+        identity["email"],
+        identity["name"],
+    )
+    now = _now_iso()
+    comment_ref = FIRESTORE_DB.collection(
+        "newsComments"
+    ).document()
+
+    comment = {
+        "articleId": article_id,
+        "text": text,
+        "visibility": visibility,
+        "ownerId": identity["uid"],
+        "ownerDisplayName": str(
+            user.get("displayName")
+            or identity["name"]
+            or "User"
+        ).strip(),
+        "ownerProfilePicLink": _profile_picture_link(user),
+        "createdAt": now,
+        "updatedAt": now,
+    }
+
+    try:
+        comment_ref.set(comment)
+    except Exception as database_error:
+        app.logger.exception(
+            "Could not create news comment: %s",
+            database_error,
+        )
+        return jsonify({"error": "Could not add comment"}), 500
+
+    return jsonify({
+        "message": "Comment added",
+        "comment": _news_comment_response(
+            comment_ref.id,
+            comment,
+            identity["uid"],
+        ),
+    }), 201
+
+
+@app.patch("/api/news/<article_id>/comments/<comment_id>")
+def update_news_comment(article_id: str, comment_id: str):
+    firestore_error = _require_firestore()
+    if firestore_error:
+        return firestore_error
+
+    identity, error = _authenticated_identity()
+    if error:
+        return error
+
+    comment_ref = _document("newsComments", comment_id)
+    snapshot = comment_ref.get()
+
+    if not snapshot.exists:
+        return jsonify({"error": "Comment not found"}), 404
+
+    comment = snapshot.to_dict() or {}
+
+    if str(comment.get("articleId") or "") != article_id:
+        return jsonify({
+            "error": "Comment does not belong to this article"
+        }), 400
+
+    if str(comment.get("ownerId") or "") != identity["uid"]:
+        return jsonify({
+            "error": "You can only edit your own comments"
+        }), 403
+
+    payload = request.get_json(silent=True) or {}
+    updates: dict[str, Any] = {}
+
+    if "text" in payload:
+        text = str(payload.get("text") or "").strip()
+        if not text:
+            return jsonify({
+                "error": "Comment text cannot be empty"
+            }), 400
+        if len(text) > NEWS_MAX_COMMENT_LENGTH:
+            return jsonify({
+                "error": "Comment is too long"
+            }), 400
+        updates["text"] = text
+
+    if "visibility" in payload:
+        visibility = str(
+            payload.get("visibility") or ""
+        ).strip().lower()
+        if visibility not in NEWS_COMMENT_VISIBILITIES:
+            return jsonify({
+                "error": "visibility must be private or public"
+            }), 400
+        updates["visibility"] = visibility
+
+    if not updates:
+        return jsonify({
+            "error": "No comment changes were provided"
+        }), 400
+
+    updates["updatedAt"] = _now_iso()
+    comment_ref.set(updates, merge=True)
+    comment.update(updates)
+
+    return jsonify({
+        "message": "Comment updated",
+        "comment": _news_comment_response(
+            comment_id,
+            comment,
+            identity["uid"],
+        ),
+    })
+
+
+@app.delete("/api/news/<article_id>/comments/<comment_id>")
+def delete_news_comment(article_id: str, comment_id: str):
+    firestore_error = _require_firestore()
+    if firestore_error:
+        return firestore_error
+
+    identity, error = _authenticated_identity()
+    if error:
+        return error
+
+    comment_ref = _document("newsComments", comment_id)
+    snapshot = comment_ref.get()
+
+    if not snapshot.exists:
+        return jsonify({"error": "Comment not found"}), 404
+
+    comment = snapshot.to_dict() or {}
+
+    if str(comment.get("articleId") or "") != article_id:
+        return jsonify({
+            "error": "Comment does not belong to this article"
+        }), 400
+
+    if str(comment.get("ownerId") or "") != identity["uid"]:
+        return jsonify({
+            "error": "You can only delete your own comments"
+        }), 403
+
+    comment_ref.delete()
+
+    return jsonify({
+        "message": "Comment deleted",
+        "commentId": comment_id,
+    })
+
+# ---------------------------------------------------------------------------
 # Task board helpers
 # ---------------------------------------------------------------------------
+
 
 TASK_BOARD_MEMBER_ROLES = frozenset({"viewer", "editor"})
 TASK_BOARD_CARD_PRIORITIES = frozenset(

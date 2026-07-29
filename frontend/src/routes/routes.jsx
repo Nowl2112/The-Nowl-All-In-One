@@ -8,6 +8,8 @@ import WordleRanked from "../pages/wordle/wordleRanked.jsx";
 import ResetPasswordPage from "../pages/resetPassword/resetPassword.jsx";
 import CalendarPage from "../pages/calendar/calendar.jsx";
 import TaskBoardPage from "../pages/taskboard/taskboard.jsx";
+import NewsCenter from "../pages/newscenter/newscenter.jsx";
+
 
 function AppRoutes() {
     return (
@@ -31,6 +33,8 @@ function AppRoutes() {
                     </ProtectedRoute>
                 }
             />
+            <Route path="/news" element={<ProtectedRoute><NewsCenter /></ProtectedRoute>} />
+
             <Route path="/task-boards" element={<ProtectedRoute><TaskBoardPage /></ProtectedRoute>} />
             <Route
                 path="/calendar"

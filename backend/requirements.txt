@@ -5,3 +5,4 @@ google-cloud-firestore
 python-dotenv
 requests
 gunicorn
+feedparser
