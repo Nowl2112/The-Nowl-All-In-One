@@ -75,6 +75,7 @@ DICTIONARY_API_BASE_URL = (
 )
 DICTIONARY_API_TIMEOUT_SECONDS = 8
 LOCAL_WORD_SELECTION_ATTEMPTS = 100
+CRON_SECRET = os.environ.get("CRON_SECRET")
 
 ADMIN_REGISTRATION_KEY = os.getenv(
     "ADMIN_REGISTRATION_KEY",
@@ -1442,6 +1443,41 @@ def _build_leaderboard() -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
+@app.route("/api/internal/send-daily-reminders", methods=["POST", "GET"])
+def send_daily_reminders():
+    supplied_secret = request.headers.get("X-Cron-Secret")
+
+    # Also allow the secret as a query parameter if your scheduler
+    # cannot configure custom request headers.
+    if not supplied_secret:
+        supplied_secret = request.args.get("secret")
+
+    if not CRON_SECRET or supplied_secret != CRON_SECRET:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    singapore_now = datetime.now(ZoneInfo("Asia/Singapore"))
+
+    try:
+        # Replace this with your existing Telegram/email reminder function.
+        result = process_due_reminders(
+            reminder_date=singapore_now.date()
+        )
+
+        return jsonify({
+            "success": True,
+            "processed_at": singapore_now.isoformat(),
+            "result": result,
+        }), 200
+
+    except Exception as error:
+        app.logger.exception("Daily reminder job failed")
+
+        return jsonify({
+            "success": False,
+            "error": str(error),
+        }), 500
+
 
 @app.get("/health")
 def health_check():
