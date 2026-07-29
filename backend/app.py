@@ -141,6 +141,10 @@ TELEGRAM_API_BASE_URL = (
     else ""
 )
 
+TELEGRAM_REQUEST_TIMEOUT_SECONDS = int(
+    os.getenv("TELEGRAM_REQUEST_TIMEOUT_SECONDS", "15")
+)
+
 TELEGRAM_LINK_TOKEN_LIFETIME_MINUTES = 15
 TELEGRAM_REMINDER_DAYS_AHEAD = 7
 TELEGRAM_NEWS_MAX_EVENTS = int(
@@ -4151,11 +4155,19 @@ def _extract_ai_message_content(
 
 
 def _parse_ai_json_response(content: str) -> dict[str, Any]:
-    """Parse the first complete JSON object found in a model response."""
+    """
+    Parse a complete top-level JSON object from the model response.
+
+    This parser deliberately avoids accepting nested event objects as the
+    summary root. It also repairs the provider-specific case where the model
+    returns all top-level fields but omits only the first opening brace.
+    """
     if not isinstance(content, str) or not content.strip():
         raise RuntimeError("The AI returned an empty summary")
 
     cleaned = content.strip().lstrip("\ufeff")
+
+    # Remove hidden reasoning and Markdown fences without touching JSON braces.
     cleaned = re.sub(
         r"<think>.*?</think>",
         "",
@@ -4163,60 +4175,113 @@ def _parse_ai_json_response(content: str) -> dict[str, Any]:
         flags=re.IGNORECASE | re.DOTALL,
     ).strip()
     cleaned = re.sub(
-        r"```(?:json)?\s*",
+        r"^\s*```(?:json)?\s*",
         "",
         cleaned,
         flags=re.IGNORECASE,
     )
-    cleaned = cleaned.replace("```", "").strip()
+    cleaned = re.sub(r"\s*```\s*$", "", cleaned).strip()
 
-    try:
-        parsed = json.loads(cleaned)
-    except json.JSONDecodeError:
-        parsed = None
+    candidate_strings: list[str] = [cleaned]
 
-    if parsed is None:
-        decoder = json.JSONDecoder()
-        parse_error: json.JSONDecodeError | None = None
-
-        # Try every opening brace. This avoids failing when explanatory text
-        # contains braces before the actual JSON response.
-        for match in re.finditer(r"\{", cleaned):
-            try:
-                candidate, consumed_length = decoder.raw_decode(
-                    cleaned[match.start():]
-                )
-            except json.JSONDecodeError as error:
-                parse_error = error
-                continue
-
-            if isinstance(candidate, dict):
-                parsed = candidate
-                trailing = cleaned[
-                    match.start() + consumed_length:
-                ].strip()
-                if trailing:
-                    app.logger.warning(
-                        "Ignored text after AI summary JSON: %r",
-                        trailing[:1000],
-                    )
-                break
-
-        if parsed is None:
-            app.logger.error(
-                "Could not parse AI summary JSON. Raw response: %r",
-                cleaned[:5000],
-            )
-            raise RuntimeError(
-                "The AI generated an invalid summary format"
-            ) from parse_error
-
-    if not isinstance(parsed, dict):
-        raise RuntimeError(
-            "The AI summary was not returned as an object"
+    # Some provider responses have been observed to omit only the first "{"
+    # while still returning the rest of the complete object.
+    if (
+        not cleaned.startswith("{")
+        and cleaned.startswith(('"', "'"))
+        and any(
+            key in cleaned[:500]
+            for key in ('"headline"', '"overview"', '"events"')
         )
+    ):
+        candidate_strings.append("{" + cleaned)
 
-    return parsed
+    parse_errors: list[json.JSONDecodeError] = []
+
+    for candidate_text in candidate_strings:
+        try:
+            parsed = json.loads(candidate_text)
+        except json.JSONDecodeError as error:
+            parse_errors.append(error)
+            continue
+
+        if not isinstance(parsed, dict):
+            continue
+
+        root_keys = set(parsed.keys())
+        if not root_keys.intersection(
+            {
+                "headline",
+                "overview",
+                "events",
+                "stories",
+                "keyEvents",
+                "key_events",
+                "summary",
+                "result",
+                "output",
+                "data",
+            }
+        ):
+            continue
+
+        return parsed
+
+    # As a final fallback, locate complete JSON objects, but only accept one
+    # that looks like the requested top-level summary. This prevents a nested
+    # event object from being mistaken for the full response.
+    decoder = json.JSONDecoder()
+
+    for match in re.finditer(r"\{", cleaned):
+        try:
+            candidate, consumed_length = decoder.raw_decode(
+                cleaned[match.start():]
+            )
+        except json.JSONDecodeError as error:
+            parse_errors.append(error)
+            continue
+
+        if not isinstance(candidate, dict):
+            continue
+
+        root_keys = set(candidate.keys())
+        if not root_keys.intersection(
+            {
+                "headline",
+                "overview",
+                "events",
+                "stories",
+                "keyEvents",
+                "key_events",
+                "summary",
+                "result",
+                "output",
+                "data",
+            }
+        ):
+            continue
+
+        trailing = cleaned[
+            match.start() + consumed_length:
+        ].strip()
+
+        if trailing:
+            app.logger.warning(
+                "Ignored text after AI summary JSON: %r",
+                trailing[:1000],
+            )
+
+        return candidate
+
+    app.logger.error(
+        "Could not parse AI summary JSON. Raw response: %r",
+        cleaned[:5000],
+    )
+
+    cause = parse_errors[-1] if parse_errors else None
+    raise RuntimeError(
+        "The AI generated an invalid summary format"
+    ) from cause
 
 
 def _post_huggingface_chat(
