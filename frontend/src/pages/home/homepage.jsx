@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/authContext.jsx";
 import haruImage from "../../assets/haru.png";
 import kotaroImage from "../../assets/kotaro.png";
+import kotaroNewsImage from "../../assets/kotaro-news.png";
 import "./homepage.css";
 
 const API_BASE_URL =
@@ -100,6 +101,10 @@ function HomePage() {
     const [upcomingItems, setUpcomingItems] = useState([]);
     const [upcomingStatus, setUpcomingStatus] = useState("idle");
     const [upcomingError, setUpcomingError] = useState("");
+
+    const [taskBoards, setTaskBoards] = useState([]);
+    const [taskBoardsStatus, setTaskBoardsStatus] = useState("idle");
+    const [taskBoardsError, setTaskBoardsError] = useState("");
 
     const [activeToolIndex, setActiveToolIndex] = useState(0);
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -299,19 +304,105 @@ function HomePage() {
         [currentUser, getAuthHeaders],
     );
 
+    const loadTaskBoards = useCallback(
+        async (signal) => {
+            if (!currentUser) {
+                setTaskBoards([]);
+                setTaskBoardsStatus("idle");
+                return;
+            }
+
+            setTaskBoardsStatus("loading");
+            setTaskBoardsError("");
+
+            try {
+                const headers = await getAuthHeaders();
+                const response = await fetch(`${API_BASE_URL}/api/task-boards`, {
+                    method: "GET",
+                    headers,
+                    signal,
+                    cache: "no-store",
+                });
+
+                const data = await readJsonResponse(response);
+
+                if (!response.ok) {
+                    throw new Error(data.error || "Could not load task boards.");
+                }
+
+                const boards = Array.isArray(data.boards) ? data.boards : [];
+                const previewBoards = await Promise.all(
+                    boards.slice(0, 3).map(async (board) => {
+                        try {
+                            const detailResponse = await fetch(
+                                `${API_BASE_URL}/api/task-boards/${board.id}`,
+                                {
+                                    method: "GET",
+                                    headers,
+                                    signal,
+                                    cache: "no-store",
+                                },
+                            );
+                            const detailData = await readJsonResponse(detailResponse);
+
+                            if (!detailResponse.ok) return board;
+
+                            const detailedBoard = detailData.board || board;
+                            const cards = Array.isArray(detailData.cards)
+                                ? detailData.cards
+                                : [];
+
+                            return {
+                                ...board,
+                                ...detailedBoard,
+                                previewCards: cards
+                                    .filter((card) => card.columnId !== "completed")
+                                    .slice(0, 3),
+                                cardCount: cards.length,
+                            };
+                        } catch (error) {
+                            if (error?.name === "AbortError") throw error;
+                            return board;
+                        }
+                    }),
+                );
+
+                setTaskBoards(previewBoards);
+                setTaskBoardsStatus("success");
+            } catch (error) {
+                if (error?.name === "AbortError") return;
+
+                console.error("Unable to load task boards:", error);
+                setTaskBoards([]);
+                setTaskBoardsError(
+                    error?.message || "Could not load task boards.",
+                );
+                setTaskBoardsStatus("error");
+            }
+        },
+        [currentUser, getAuthHeaders],
+    );
+
     const refreshHomeData = useCallback(async () => {
         await Promise.all([
             loadCurrentPlayer(),
             loadLeaderboard(),
             loadUpcomingItems(),
+            loadTaskBoards(),
         ]);
-    }, [loadCurrentPlayer, loadLeaderboard, loadUpcomingItems]);
+    }, [
+        loadCurrentPlayer,
+        loadLeaderboard,
+        loadUpcomingItems,
+        loadTaskBoards,
+    ]);
 
     useEffect(() => {
         if (!currentUser?.uid) {
             setCurrentPlayer(null);
             setLeaderboard([]);
             setUpcomingItems([]);
+            setTaskBoards([]);
             return undefined;
         }
 
@@ -321,6 +412,7 @@ function HomePage() {
             loadCurrentPlayer(controller.signal),
             loadLeaderboard(controller.signal),
             loadUpcomingItems(controller.signal),
+            loadTaskBoards(controller.signal),
         ]);
 
         return () => controller.abort();
@@ -329,6 +421,7 @@ function HomePage() {
         loadCurrentPlayer,
         loadLeaderboard,
         loadUpcomingItems,
+        loadTaskBoards,
     ]);
 
     const leaderboardPlayer = useMemo(
@@ -365,6 +458,8 @@ function HomePage() {
             setLeaderboardError("");
             setUpcomingItems([]);
             setUpcomingError("");
+            setTaskBoards([]);
+            setTaskBoardsError("");
 
             await logout();
             navigate("/login", { replace: true });
@@ -592,30 +687,36 @@ function HomePage() {
                             </article>
                         )}
 
-                        {/*{activeToolIndex === 1 && (
+                        {activeToolIndex === 1 && (
                             <article className="tool-slide tool-slide--headlines">
                                 <div className="tool-slide__topline">
                                     <div>
-                                        <span className="tool-slide__icon" aria-hidden="true">◫</span>
+                                        <span className="tool-slide__icon" aria-hidden="true">📰</span>
                                         <div>
-                                            <p>Today’s headlines</p>
-                                            <h3>Your daily news briefing</h3>
+                                            <p>Today's Headlines</p>
+                                            <h3>Coming Soon</h3>
                                         </div>
                                     </div>
-                                    <span className="tool-status-pill">Coming soon</span>
+
+                                    <span className="tool-status-pill">In Development</span>
                                 </div>
 
-                                <div className="headline-preview-list">
-                                    {[
-                                        "Top stories selected for the family",
-                                        "Short summaries without the clutter",
-                                        "Open the full article when something matters",
-                                    ].map((headline, index) => (
-                                        <div className="headline-preview" key={headline}>
-                                            <span>{String(index + 1).padStart(2, "0")}</span>
-                                            <strong>{headline}</strong>
-                                        </div>
-                                    ))}
+                                <div className="headline-coming-soon">
+                                    <img
+                                        src={kotaroNewsImage}   // import your image
+                                        alt="Kotaro looking for today's news"
+                                        className="headline-coming-soon__image"
+                                    />
+
+                                    <div className="headline-coming-soon__content">
+                                        <h4>Feature not available yet.</h4>
+
+                                        <p>
+                                            Kotaro is still looking for today's articles...
+                                            <br />
+                                            Please check back soon!
+                                        </p>
+                                    </div>
                                 </div>
                             </article>
                         )}
@@ -630,32 +731,130 @@ function HomePage() {
                                             <h3>Keep shared work moving</h3>
                                         </div>
                                     </div>
-                                    <button
-                                        type="button"
-                                        className="button button--primary"
-                                        onClick={() => navigate("/task-boards")}
-                                    >
-                                        Go to task boards
-                                    </button>
+
+                                    <div className="tool-slide__actions">
+                                        <button
+                                            type="button"
+                                            className="button button--ghost"
+                                            onClick={() => loadTaskBoards()}
+                                            disabled={taskBoardsStatus === "loading"}
+                                        >
+                                            {taskBoardsStatus === "loading"
+                                                ? "Loading..."
+                                                : "Refresh"}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="button button--primary"
+                                            onClick={() => navigate("/task-boards")}
+                                        >
+                                            Open task boards
+                                        </button>
+                                    </div>
                                 </div>
 
-                                <div className="board-preview">
-                                    {[
-                                        ["Backlog", "Plan birthday dinner", "3 cards"],
-                                        ["In progress", "Book family trip", "2 cards"],
-                                        ["Completed", "Update shared calendar", "5 cards"],
-                                    ].map(([title, task, count]) => (
-                                        <div className="board-preview__column" key={title}>
+                                {taskBoardsStatus === "loading" && (
+                                    <div className="board-widget-state">
+                                        Loading your boards...
+                                    </div>
+                                )}
+
+                                {taskBoardsStatus === "error" && (
+                                    <div className="board-widget-state board-widget-state--error">
+                                        {taskBoardsError}
+                                    </div>
+                                )}
+
+                                {taskBoardsStatus === "success" &&
+                                    taskBoards.length === 0 && (
+                                        <div className="board-widget-empty">
+                                            <span aria-hidden="true">☷</span>
                                             <div>
-                                                <strong>{title}</strong>
-                                                <span>{count}</span>
+                                                <strong>No task boards yet.</strong>
+                                                <p>
+                                                    Create a board to organise personal,
+                                                    family, or shared work.
+                                                </p>
                                             </div>
-                                            <p>{task}</p>
+                                            <button
+                                                type="button"
+                                                className="button button--primary"
+                                                onClick={() => navigate("/task-boards")}
+                                            >
+                                                Create board
+                                            </button>
                                         </div>
-                                    ))}
-                                </div>
+                                    )}
+
+                                {taskBoardsStatus === "success" &&
+                                    taskBoards.length > 0 && (
+                                        <div className="board-widget-grid">
+                                            {taskBoards.map((board) => {
+                                                const columns = Array.isArray(board.columns)
+                                                    ? board.columns
+                                                    : [];
+                                                const previewCards = Array.isArray(
+                                                    board.previewCards,
+                                                )
+                                                    ? board.previewCards
+                                                    : [];
+
+                                                return (
+                                                    <button
+                                                        type="button"
+                                                        className="board-widget-card"
+                                                        key={board.id}
+                                                        onClick={() =>
+                                                            navigate("/task-boards", {
+                                                                state: {
+                                                                    boardId: board.id,
+                                                                },
+                                                            })
+                                                        }
+                                                    >
+                                                        <span className="board-widget-card__topline">
+                                                            <strong>{board.name}</strong>
+                                                            <span aria-hidden="true">→</span>
+                                                        </span>
+
+                                                        <span className="board-widget-card__meta">
+                                                            {board.cardCount ?? 0} cards ·{" "}
+                                                            {columns.length} columns
+                                                        </span>
+
+                                                        {board.description && (
+                                                            <span className="board-widget-card__description">
+                                                                {board.description}
+                                                            </span>
+                                                        )}
+
+                                                        <span className="board-widget-card__tasks">
+                                                            {previewCards.length > 0 ? (
+                                                                previewCards.map((card) => (
+                                                                    <span
+                                                                        className="board-widget-task"
+                                                                        key={card.id}
+                                                                    >
+                                                                        <span
+                                                                            className={`board-widget-task__priority board-widget-task__priority--${card.priority || "none"}`}
+                                                                            aria-hidden="true"
+                                                                        />
+                                                                        <span>{card.title}</span>
+                                                                    </span>
+                                                                ))
+                                                            ) : (
+                                                                <span className="board-widget-card__clear">
+                                                                    No active card preview
+                                                                </span>
+                                                            )}
+                                                        </span>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
                             </article>
-                        )}*/}
+                        )}
                     </div>
 
                     <div className="tool-carousel__dots" aria-label="Choose useful tool">
