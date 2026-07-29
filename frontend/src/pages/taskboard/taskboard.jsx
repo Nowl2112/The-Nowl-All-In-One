@@ -112,6 +112,7 @@ function TaskBoardPage() {
     const [notice, setNotice] = useState("");
 
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+    const [isMobileBoardMenuOpen, setIsMobileBoardMenuOpen] = useState(false);
     const [libraryTab, setLibraryTab] = useState("calendar");
     const [librarySearch, setLibrarySearch] = useState("");
 
@@ -250,6 +251,10 @@ function TaskBoardPage() {
     useEffect(() => {
         localStorage.setItem("nowlTaskBoardPresets", JSON.stringify(presets));
     }, [presets]);
+
+    useEffect(() => {
+        setIsMobileBoardMenuOpen(false);
+    }, [activeBoardId]);
 
     useEffect(() => {
         if (!notice) return undefined;
@@ -726,6 +731,18 @@ function TaskBoardPage() {
                     </button>
                 </div>
 
+                <button
+                    type="button"
+                    className="task-board-sidebar__mobile-board-toggle"
+                    onClick={() => setIsMobileBoardMenuOpen((value) => !value)}
+                    aria-expanded={isMobileBoardMenuOpen}
+                    aria-controls="task-board-mobile-menu"
+                >
+                    <span aria-hidden="true">▦</span>
+                    <span>{activeBoard?.name || "Select board"}</span>
+                    <span aria-hidden="true">{isMobileBoardMenuOpen ? "⌃" : "⌄"}</span>
+                </button>
+
                 <nav className="task-board-sidebar__nav">
                     <button type="button" onClick={() => navigate("/")}>
                         <span aria-hidden="true">⌂</span>
@@ -741,7 +758,12 @@ function TaskBoardPage() {
                     </button>
                 </nav>
 
-                <div className="task-board-sidebar__section">
+                <div
+                    id="task-board-mobile-menu"
+                    className={`task-board-sidebar__section ${
+                        isMobileBoardMenuOpen ? "task-board-sidebar__section--mobile-open" : ""
+                    }`}
+                >
                     <div className="task-board-sidebar__section-title">
                         <span className="task-board-sidebar__label">Your boards</span>
                         <button
@@ -761,7 +783,10 @@ function TaskBoardPage() {
                                 className={
                                     board.id === activeBoardId ? "is-active" : ""
                                 }
-                                onClick={() => setActiveBoardId(board.id)}
+                                onClick={() => {
+                                    setActiveBoardId(board.id);
+                                    setIsMobileBoardMenuOpen(false);
+                                }}
                                 title={board.name}
                             >
                                 <span aria-hidden="true">▦</span>
