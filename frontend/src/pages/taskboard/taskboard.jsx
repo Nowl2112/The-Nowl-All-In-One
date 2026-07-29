@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/authContext.jsx";
 import kotaroImage from "../../assets/kotaro.png";
-import "./taskBoard.css";
+import "./taskboard.css";
 
 const API_BASE_URL =
     import.meta.env.VITE_API_BASE_URL ||
