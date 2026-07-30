@@ -1257,8 +1257,6 @@ def _set_telegram_subscription_active(
             "timezone": "Asia/Singapore",
             "linkedAt": _now_iso(),
             "updatedAt": _now_iso(),
-            "lastSentAt": None,
-            "lastDeliveryStatus": None,
         },
         merge=True,
     )
@@ -6698,10 +6696,6 @@ def get_telegram_subscription():
                 or None
             ),
             "linkedAt": subscription.get("linkedAt"),
-            "lastSentAt": subscription.get("lastSentAt"),
-            "lastDeliveryStatus": subscription.get(
-                "lastDeliveryStatus"
-            ),
             "reminderHour": subscription.get(
                 "reminderHour",
                 8,
@@ -6864,10 +6858,6 @@ def send_daily_telegram_reminders():
             skipped_count += 1
             continue
 
-        if subscription.get("lastSentDate") == today_key:
-            skipped_count += 1
-            continue
-
         try:
             user = _read_document("users", uid) or {}
             items = _get_user_week_ahead_items(uid)
@@ -6886,18 +6876,8 @@ def send_daily_telegram_reminders():
                 ),
             )
 
-            _write_document(
-                "telegramSubscriptions",
-                uid,
-                {
-                    "lastSentAt": _now_iso(),
-                    "lastSentDate": today_key,
-                    "lastDeliveryStatus": "sent",
-                    "lastDeliveryItemCount": len(items),
-                    "updatedAt": _now_iso(),
-                },
-                merge=True,
-            )
+            # Do not persist delivery state. Each cron invocation sends
+            # the current reminder independently.
             sent_count += 1
 
         except Exception as delivery_error:
@@ -6908,18 +6888,6 @@ def send_daily_telegram_reminders():
                     "uid": uid,
                     "error": error_message,
                 }
-            )
-
-            _write_document(
-                "telegramSubscriptions",
-                uid,
-                {
-                    "lastDeliveryStatus": "failed",
-                    "lastDeliveryError": error_message,
-                    "lastDeliveryAttemptAt": _now_iso(),
-                    "updatedAt": _now_iso(),
-                },
-                merge=True,
             )
 
             app.logger.exception(
