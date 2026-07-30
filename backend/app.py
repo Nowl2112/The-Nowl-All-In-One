@@ -4189,7 +4189,7 @@ def _parse_ai_json_response(content: str) -> dict[str, Any]:
         and cleaned.startswith(('"', "'"))
         and any(
             key in cleaned[:500]
-            for key in ('"headline"', '"overview"', '"events"')
+            for key in ('"headline"', '"overview"', '"events"', '"articles"', '"summaries"', '"items"')
         )
     ):
         candidate_strings.append("{" + cleaned)
@@ -4219,6 +4219,9 @@ def _parse_ai_json_response(content: str) -> dict[str, Any]:
                 "result",
                 "output",
                 "data",
+                "articles",
+                "summaries",
+                "items",
             }
         ):
             continue
@@ -4255,6 +4258,9 @@ def _parse_ai_json_response(content: str) -> dict[str, Any]:
                 "result",
                 "output",
                 "data",
+                "articles",
+                "summaries",
+                "items",
             }
         ):
             continue
