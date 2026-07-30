@@ -37,6 +37,7 @@ except ImportError:  # pragma: no cover
 # Environment and application setup
 # ---------------------------------------------------------------------------
 
+
 BACKEND_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BACKEND_DIR.parent
 load_dotenv(PROJECT_ROOT / ".env")
@@ -207,12 +208,13 @@ def _initialize_firebase() -> None:
         )
 
 
-
-
 # ---------------------------------------------------------------------------
 # Frontend serving
 # ---------------------------------------------------------------------------
+FRONTEND_DIST_DIR = (BACKEND_DIR / "frontend_dist").resolve()
 
+if not FRONTEND_DIST_DIR.exists():
+    FRONTEND_DIST_DIR = (PROJECT_ROOT / "frontend" / "dist").resolve()
 
 
 # ---------------------------------------------------------------------------
@@ -1734,17 +1736,9 @@ def _build_leaderboard() -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
-
-
-
-
-
-
-
 # ---------------------------------------------------------------------------
 # User lookup for calendar tagging
 # ---------------------------------------------------------------------------
-
 
 
 # ---------------------------------------------------------------------------
@@ -1752,25 +1746,9 @@ def _build_leaderboard() -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # ---------------------------------------------------------------------------
 # News configuration
 # ---------------------------------------------------------------------------
-
 CNA_RSS_FEEDS = {
     "latest": (
         "https://www.channelnewsasia.com/api/v1/"
@@ -3442,32 +3420,9 @@ def _news_comment_response(
     }
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # ---------------------------------------------------------------------------
 # Task board helpers
 # ---------------------------------------------------------------------------
-
-
 TASK_BOARD_MEMBER_ROLES = frozenset({"viewer", "editor"})
 TASK_BOARD_CARD_PRIORITIES = frozenset(
     {"none", "low", "medium", "high", "urgent"})
@@ -3477,8 +3432,6 @@ TASK_BOARD_DEFAULT_COLUMNS = [
     {"id": "completed", "name": "Completed", "position": 2},
     {"id": "reminders", "name": "Reminders", "position": 3},
 ]
-
-
 
 
 def _normalize_board_columns(value: Any) -> tuple[list[dict[str, Any]], str | None]:
@@ -3580,7 +3533,8 @@ def _require_task_board_access(board_id: str, uid: str, *, minimum_role: str = "
     try:
         board_ref, board = _load_task_board(board_id)
     except Exception as database_error:
-        current_app.logger.exception("Could not load task board: %s", database_error)
+        current_app.logger.exception(
+            "Could not load task board: %s", database_error)
         return None, None, (jsonify({"error": "Could not load task board"}), 500)
     if board is None:
         return None, None, (jsonify({"error": "Task board not found"}), 404)
@@ -3708,53 +3662,9 @@ def _load_task_board_cards(board_id: str) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # ---------------------------------------------------------------------------
 # Telegram routes
 # ---------------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 # Export private helpers as well so route modules can share the original logic.

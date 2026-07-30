@@ -33,4 +33,3 @@ def health_check():
             ),
         }
     )
-

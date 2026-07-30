@@ -2,8 +2,7 @@
 
 from flask import Blueprint
 
-from core import *  # noqa: F403 - shared legacy helpers during migration
-
+from core import FRONTEND_DIST_DIR
 bp = Blueprint("frontend", __name__)
 
 
@@ -37,4 +36,3 @@ def serve_frontend(path: str):
         FRONTEND_DIST_DIR,
         "index.html",
     )
-
