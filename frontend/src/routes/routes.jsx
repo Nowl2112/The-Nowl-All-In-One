@@ -9,6 +9,7 @@ import ResetPasswordPage from "../pages/resetPassword/resetPassword.jsx";
 import CalendarPage from "../pages/calendar/calendar.jsx";
 import TaskBoardPage from "../pages/taskboard/taskboard.jsx";
 import NewsCenter from "../pages/newscenter/newscenter.jsx";
+import RiddlesPage from "../pages/riddles/riddlespage.jsx";
 
 
 function AppRoutes() {
@@ -44,6 +45,7 @@ function AppRoutes() {
                     </ProtectedRoute>
                 }
             />
+            <Route path="/riddles" element={<RiddlesPage />} />
             <Route path="/reset-password" element={<ResetPasswordPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

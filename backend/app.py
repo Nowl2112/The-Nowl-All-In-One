@@ -1,4 +1,3 @@
-"""The Nowl backend application entry point."""
 
 import os
 
@@ -25,6 +24,7 @@ def create_app(config_object=Config):
     from routes.frontend import bp as frontend_bp
     from routes.health import bp as health_bp
     from routes.news import bp as news_bp
+    from routes.riddles import bp as riddles_bp
     from routes.task_boards import bp as task_boards_bp
     from routes.telegram import bp as telegram_bp
     from routes.users import bp as users_bp
@@ -37,6 +37,7 @@ def create_app(config_object=Config):
         users_bp,
         calendar_bp,
         news_bp,
+        riddles_bp,
         task_boards_bp,
         telegram_bp,
         wordle_bp,
@@ -56,4 +57,3 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=int(os.getenv("PORT", "5000")),
     )
-

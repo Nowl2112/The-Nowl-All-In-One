@@ -7,6 +7,7 @@ import kotaroNewsImage from "../../assets/kotaro-news.png";
 import calendarToolIcon from "../../assets/seckotaro.png";
 import newsToolIcon from "../../assets/news-tool-icon.png";
 import taskBoardsToolIcon from "../../assets/taskboard-tool-icon.png";
+import haruDetective from "../../assets/haru-detective.png";
 import "./homepage.css";
 
 const API_BASE_URL =
@@ -120,6 +121,10 @@ function HomePage() {
     const [leaderboard, setLeaderboard] = useState([]);
     const [leaderboardStatus, setLeaderboardStatus] = useState("idle");
     const [leaderboardError, setLeaderboardError] = useState("");
+    const [leaderboardGame, setLeaderboardGame] = useState("wordle");
+    const [dailyRiddle, setDailyRiddle] = useState(null);
+    const [dailyRiddleStatus, setDailyRiddleStatus] = useState("idle");
+    const [dailyRiddleError, setDailyRiddleError] = useState("");
 
     const [upcomingItems, setUpcomingItems] = useState([]);
     const [upcomingStatus, setUpcomingStatus] = useState("idle");
@@ -229,7 +234,7 @@ function HomePage() {
             try {
                 const headers = await getAuthHeaders();
                 const response = await fetch(
-                    `${API_BASE_URL}/api/games/wordle/leaderboard?limit=100`,
+                    `${API_BASE_URL}/api/games/${leaderboardGame === "wordle" ? "wordle" : "riddles"}/leaderboard?limit=100`,
                     {
                         method: "GET",
                         headers,
@@ -261,6 +266,43 @@ function HomePage() {
                     error?.message || "Could not load the leaderboard.",
                 );
                 setLeaderboardStatus("error");
+            }
+        },
+        [currentUser, getAuthHeaders, leaderboardGame],
+    );
+
+    const loadDailyRiddle = useCallback(
+        async (signal) => {
+            if (!currentUser) {
+                setDailyRiddle(null);
+                setDailyRiddleStatus("idle");
+                return;
+            }
+
+            setDailyRiddleStatus("loading");
+            setDailyRiddleError("");
+
+            try {
+                const headers = await getAuthHeaders();
+                const response = await fetch(
+                    `${API_BASE_URL}/api/games/riddles/today`,
+                    { headers, signal, cache: "no-store" },
+                );
+                const data = await readJsonResponse(response);
+
+                if (!response.ok) {
+                    throw new Error(data.error || "Could not load today's riddle.");
+                }
+
+                setDailyRiddle(data);
+                setDailyRiddleStatus("success");
+            } catch (error) {
+                if (error?.name === "AbortError") return;
+                setDailyRiddle(null);
+                setDailyRiddleError(
+                    error?.message || "Could not load today's riddle.",
+                );
+                setDailyRiddleStatus("error");
             }
         },
         [currentUser, getAuthHeaders],
@@ -469,6 +511,7 @@ function HomePage() {
             loadUpcomingItems(),
             loadHeadlines(),
             loadTaskBoards(),
+            loadDailyRiddle(),
         ]);
     }, [
         loadCurrentPlayer,
@@ -476,6 +519,7 @@ function HomePage() {
         loadUpcomingItems,
         loadHeadlines,
         loadTaskBoards,
+        loadDailyRiddle,
     ]);
 
     useEffect(() => {
@@ -485,6 +529,7 @@ function HomePage() {
             setUpcomingItems([]);
             setHeadlines([]);
             setTaskBoards([]);
+            setDailyRiddle(null);
             return undefined;
         }
 
@@ -496,6 +541,7 @@ function HomePage() {
             loadUpcomingItems(controller.signal),
             loadHeadlines(controller.signal),
             loadTaskBoards(controller.signal),
+            loadDailyRiddle(controller.signal),
         ]);
 
         return () => controller.abort();
@@ -506,6 +552,7 @@ function HomePage() {
         loadUpcomingItems,
         loadHeadlines,
         loadTaskBoards,
+        loadDailyRiddle,
     ]);
 
     const leaderboardPlayer = useMemo(
@@ -546,6 +593,8 @@ function HomePage() {
             setHeadlinesError("");
             setTaskBoards([]);
             setTaskBoardsError("");
+            setDailyRiddle(null);
+            setDailyRiddleError("");
 
             await logout();
             navigate("/login", { replace: true });
@@ -1136,23 +1185,48 @@ function HomePage() {
                         </button>
                     </article>
 
-                    <aside className="coming-soon-card">
-                            <img
-                                className="coming-soon-mascot"
-                                src={haruImage}
-                                alt="Haru, the orange cat mascot"
-                            />
+                    <aside className="riddle-widget">
+                        <div className="riddle-widget__topline">
+                            <span className="pill">New every day</span>
+                            <img src={haruDetective} alt="" className="riddle-widget__icon" />
+                        </div>
 
                         <div>
-                            <p className="home-section-label">
-                                More on the way
-                            </p>
-                            <h2>New games soon</h2>
-                            <p>
-                                Haru&apos;s fat ass is blocking the way, so
-                                gimme some time to move him.
-                            </p>
+                            <p className="home-section-label">Daily riddle</p>
+                            <h2>Think outside the box</h2>
+
+                            {dailyRiddleStatus === "loading" && (
+                                <p>Haru is finding today&apos;s riddle...</p>
+                            )}
+                            {dailyRiddleStatus === "error" && (
+                                <p className="riddle-widget__error">{dailyRiddleError}</p>
+                            )}
+                            {dailyRiddleStatus === "success" && (
+                                <>
+                                    <p className="riddle-widget__question">
+                                        {dailyRiddle?.riddle?.question}
+                                    </p>
+                                    <small>
+                                        {dailyRiddle?.game?.status === "won"
+                                            ? `Solved · +${dailyRiddle.game.pointsGained || 0} points`
+                                            : dailyRiddle?.game?.status === "lost"
+                                              ? "Come back tomorrow for another riddle."
+                                              : `${dailyRiddle?.game?.attemptsRemaining ?? 5} attempts remaining`}
+                                    </small>
+                                </>
+                            )}
                         </div>
+
+                        <button
+                            type="button"
+                            className="button button--primary"
+                            onClick={() => navigate("/riddles")}
+                        >
+                            {dailyRiddle?.game?.status === "playing"
+                                ? "Solve riddle"
+                                : "View riddle"}{" "}
+                            <span aria-hidden="true">→</span>
+                        </button>
                     </aside>
                 </section>
 
@@ -1163,24 +1237,42 @@ function HomePage() {
                     <div className="leaderboard-header">
                         <div>
                             <p className="home-section-label">
-                                Wordle Ranked
+                                Daily games
                             </p>
                             <h2>Leaderboard</h2>
                         </div>
 
-                        <button
-                            type="button"
-                            className="leaderboard-refresh-button"
-                            onClick={refreshHomeData}
-                            disabled={
-                                leaderboardStatus === "loading" ||
-                                playerStatus === "loading"
-                            }
-                        >
-                            {leaderboardStatus === "loading"
-                                ? "Loading..."
-                                : "Refresh"}
-                        </button>
+                        <div className="leaderboard-header__actions">
+                            <div className="leaderboard-switch" role="tablist" aria-label="Choose leaderboard">
+                                <button
+                                    type="button"
+                                    role="tab"
+                                    aria-selected={leaderboardGame === "wordle"}
+                                    className={leaderboardGame === "wordle" ? "is-active" : ""}
+                                    onClick={() => setLeaderboardGame("wordle")}
+                                >
+                                    Wordle
+                                </button>
+                                <button
+                                    type="button"
+                                    role="tab"
+                                    aria-selected={leaderboardGame === "riddles"}
+                                    className={leaderboardGame === "riddles" ? "is-active" : ""}
+                                    onClick={() => setLeaderboardGame("riddles")}
+                                >
+                                    Riddles
+                                </button>
+                            </div>
+
+                            <button
+                                type="button"
+                                className="leaderboard-refresh-button"
+                                onClick={refreshHomeData}
+                                disabled={leaderboardStatus === "loading"}
+                            >
+                                {leaderboardStatus === "loading" ? "Loading..." : "Refresh"}
+                            </button>
+                        </div>
                     </div>
 
                     {leaderboardStatus === "loading" && (
@@ -1210,9 +1302,17 @@ function HomePage() {
                                         <tr>
                                             <th>Rank</th>
                                             <th>Player</th>
-                                            <th>Points</th>
+                                            <th>
+                                                {leaderboardGame === "wordle"
+                                                    ? "Points"
+                                                    : "All-time score"}
+                                            </th>
                                             <th>Wins</th>
-                                            <th>Win rate</th>
+                                            <th>
+                                                {leaderboardGame === "wordle"
+                                                    ? "Win rate"
+                                                    : "30-day score"}
+                                            </th>
                                         </tr>
                                     </thead>
 
@@ -1290,11 +1390,21 @@ function HomePage() {
 
                                                     <td>
                                                         <strong>
-                                                            {player.rankScore}
+                                                            {leaderboardGame === "wordle"
+                                                                ? player.rankScore
+                                                                : (player.allTimeScore ??
+                                                                  player.lifetimePoints ??
+                                                                  0)}
                                                         </strong>
                                                     </td>
                                                     <td>{player.wins}</td>
-                                                    <td>{player.winRate}%</td>
+                                                    <td>
+                                                        {leaderboardGame === "wordle"
+                                                            ? `${player.winRate}%`
+                                                            : (player.monthlyScore ??
+                                                              player.rollingScore ??
+                                                              0)}
+                                                    </td>
                                                 </tr>
                                             );
                                         })}

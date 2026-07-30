@@ -278,6 +278,113 @@ button, input { font: inherit; }
     font-weight: 900;
 }
 
+.riddle-widget {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 24px;
+    min-height: 100%;
+    padding: 28px;
+    border: 2px solid var(--nowl-border);
+    border-radius: 24px;
+    background: #fff5e8;
+    box-shadow: 5px 5px 0 rgba(25, 25, 25, .12);
+}
+
+.riddle-widget__topline,
+.leaderboard-header__actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.riddle-widget__icon {
+    width: 200px;
+    height: auto;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    border-radius: 20px;
+}
+
+.riddle-widget__icon img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+}
+
+.riddle-widget h2 {
+    margin: 0;
+    font-size: 30px;
+    letter-spacing: -.04em;
+}
+
+.riddle-widget p {
+    color: var(--nowl-muted);
+    line-height: 1.6;
+}
+
+.riddle-widget__question {
+    display: -webkit-box;
+    overflow: hidden;
+    color: var(--nowl-text) !important;
+    font-weight: 800;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+}
+
+.riddle-widget small {
+    display: block;
+    color: var(--nowl-blue-dark);
+    font-weight: 800;
+}
+
+.riddle-widget__error {
+    color: #a23d35 !important;
+}
+
+.leaderboard-switch {
+    display: inline-flex;
+    padding: 4px;
+    border: 2px solid var(--nowl-border);
+    border-radius: 13px;
+    background: #eee8df;
+}
+
+.leaderboard-switch button {
+    min-height: 38px;
+    padding: 0 15px;
+    border: 0;
+    border-radius: 9px;
+    background: transparent;
+    color: var(--nowl-muted);
+    cursor: pointer;
+    font-weight: 900;
+}
+
+.leaderboard-switch button.is-active {
+    background: var(--nowl-surface);
+    color: var(--nowl-text);
+    box-shadow: 2px 2px 0 rgba(25, 25, 25, .16);
+}
+
+@media (max-width: 700px) {
+    .leaderboard-header,
+    .leaderboard-header__actions {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .leaderboard-switch {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
 .leaderboard-player {
     display: flex;
     align-items: center;
@@ -924,7 +1031,7 @@ button, input { font: inherit; }
 .tool-status-pill {
     padding: 8px 11px;
     border: 2px solid var(--nowl-border);
-    border-radius: 999px;
+    border-radius: 15px;
     background: #fff0d7;
     font-size: 11px;
     font-weight: 900;
