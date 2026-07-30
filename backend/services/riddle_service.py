@@ -34,13 +34,15 @@ def today_key() -> str:
 def normalize_answer(value: Any) -> str:
     value = unicodedata.normalize("NFKD", str(value or "").lower())
     value = "".join(
-        character for character in value if not unicodedata.combining(character))
+        character for character in value if not unicodedata.combining(character)
+    )
     value = re.sub(r"[^a-z0-9\s]", " ", value)
     value = re.sub(r"\s+", " ", value).strip()
     return re.sub(r"^(?:a|an|the)\s+", "", value)
 
 
 def answer_matches(guess: str, daily: dict[str, Any]) -> bool:
+    """Fast local matching; AI judging is performed by the route if this is false."""
     accepted = [daily.get("answer"), *(daily.get("acceptedAnswers") or [])]
     normalized_guess = normalize_answer(guess)
     return bool(normalized_guess) and normalized_guess in {
@@ -58,6 +60,7 @@ def calculate_points(wrong_guesses: int, hints_used: int) -> int:
 
 
 def make_hint(daily: dict[str, Any]) -> str:
+    """Local fallback used only when AI hint generation is unavailable."""
     answer = normalize_answer(daily.get("answer"))
     words = answer.split()
     if not words:
@@ -72,7 +75,9 @@ def make_hint(daily: dict[str, Any]) -> str:
     )
 
 
-def public_riddle(daily: dict[str, Any], *, reveal_answer: bool = False) -> dict[str, Any]:
+def public_riddle(
+    daily: dict[str, Any], *, reveal_answer: bool = False
+) -> dict[str, Any]:
     result = {
         "id": daily["id"],
         "date": daily["date"],
@@ -149,7 +154,6 @@ def get_or_create_daily_riddle(date_string: str | None = None) -> dict[str, Any]
         "createdAt": now_iso(),
     }
 
-    # create() is atomic: only the first request can claim this date.
     try:
         reference.create(document)
         return document
@@ -197,14 +201,14 @@ def save_player(uid: str, player: dict[str, Any]) -> None:
 
 
 def public_stats(player: dict[str, Any]) -> dict[str, Any]:
-    all_time_score = int(player.get("lifetimePoints", 0))
+    permanent_score = int(player.get("lifetimePoints", 0))
+    monthly_score = rolling_score(player)
     return {
         "userId": player.get("userId"),
-        "allTimeScore": all_time_score,
-        "monthlyScore": rolling_score(player),
-        # Kept for compatibility with older frontend code.
-        "lifetimePoints": all_time_score,
-        "rollingScore": rolling_score(player),
+        "allTimeScore": permanent_score,
+        "monthlyScore": monthly_score,
+        "lifetimePoints": permanent_score,
+        "rollingScore": monthly_score,
         "wins": int(player.get("wins", 0)),
         "gamesPlayed": int(player.get("gamesPlayed", 0)),
     }
@@ -225,5 +229,4 @@ def rolling_score(player: dict[str, Any], today: str | None = None) -> int:
 
 
 def all_time_score(player: dict[str, Any]) -> int:
-    """Return the permanent ranked score stored in Firestore."""
     return int(player.get("lifetimePoints", 0))

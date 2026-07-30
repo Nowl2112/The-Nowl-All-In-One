@@ -7,6 +7,10 @@ from core import (
     _require_firestore,
 )
 from services.firebase import get_db
+from services.riddle_ai_service import (
+    generate_riddle_hints,
+    judge_riddle_answer,
+)
 from services.riddle_service import (
     LEADERBOARD_BEST_SCORES,
     LEADERBOARD_WINDOW_DAYS,
@@ -99,7 +103,24 @@ def submit_riddle_guess():
         return jsonify({"error": "You have already completed today's riddle"}), 409
 
     game.setdefault("guesses", []).append(guess)
+    # Use the fast, deterministic matcher first. The model is only needed for
+    # non-exact guesses such as synonyms, small misspellings, or equivalent
+    # phrasings.
     did_win = answer_matches(guess, daily)
+    if not did_win:
+        try:
+            did_win = judge_riddle_answer(
+                question=str(daily.get("question") or ""),
+                expected_answer=str(daily.get("answer") or ""),
+                user_guess=guess,
+            )
+        except Exception as exc:
+            # A provider outage must not prevent the user from playing. In that
+            # case, retain the safe result from the exact local matcher.
+            current_app.logger.exception(
+                "AI riddle answer judging failed; using exact-match result: %s",
+                exc,
+            )
     points = 0
 
     if did_win:
@@ -159,13 +180,56 @@ def get_riddle_hint():
     if game.get("status") != "playing":
         return jsonify({"error": "Today's riddle is already complete"}), 409
 
-    if not game.get("hint"):
-        game["hint"] = make_hint(daily)
-        game["hintsUsed"] = 1
-        player.setdefault("daily", {})[daily["date"]] = game
-        save_player(identity["uid"], player)
+    hints = daily.get("hints")
+    if not isinstance(hints, list) or len(hints) != 3:
+        try:
+            hints = generate_riddle_hints(
+                str(daily.get("question") or ""),
+                str(daily.get("answer") or ""),
+            )
+            # Store one shared set on the daily riddle. Future users and future
+            # hint requests reuse it instead of calling the model again.
+            get_db().collection("riddleDaily").document(daily["date"]).set(
+                {
+                    "hints": hints,
+                    "hintsGeneratedAt": now_iso(),
+                    "hintsSource": "ai",
+                },
+                merge=True,
+            )
+            daily["hints"] = hints
+        except Exception as exc:
+            current_app.logger.exception(
+                "AI riddle hint generation failed; using local fallback: %s",
+                exc,
+            )
+            hints = [make_hint(daily)]
 
-    return jsonify({"hint": game["hint"], "hintsUsed": game["hintsUsed"]})
+    hints_used = int(game.get("hintsUsed", 0))
+    if hints_used >= len(hints):
+        return jsonify(
+            {
+                "error": "You have already revealed all available hints",
+                "hint": game.get("hint"),
+                "hintsUsed": hints_used,
+            }
+        ), 409
+
+    hint = str(hints[hints_used]).strip()
+    game["hintsUsed"] = hints_used + 1
+    game["hint"] = hint
+    game.setdefault("revealedHints", []).append(hint)
+    player.setdefault("daily", {})[daily["date"]] = game
+    save_player(identity["uid"], player)
+
+    return jsonify(
+        {
+            "hint": hint,
+            "hints": game["revealedHints"],
+            "hintsUsed": game["hintsUsed"],
+            "hintsRemaining": max(0, len(hints) - game["hintsUsed"]),
+        }
+    )
 
 
 @bp.get("/api/games/riddles/me")
