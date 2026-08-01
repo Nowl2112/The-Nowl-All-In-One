@@ -52,6 +52,7 @@ except Exception:
 
 WORD_LENGTH = 5
 MAX_ATTEMPTS = 6
+MAX_COMBO = 10
 
 DICTIONARY_API_BASE_URL = (
     "https://api.dictionaryapi.dev/api/v2/entries/en"
@@ -246,6 +247,15 @@ def _yesterday_key() -> str:
     return (
         datetime.now(SINGAPORE_TZ).date() - timedelta(days=1)
     ).isoformat()
+
+
+def _month_key(date_key: str | None = None) -> str:
+    return (date_key or _today_key())[:7]
+
+
+def _previous_month_key() -> str:
+    today = datetime.now(SINGAPORE_TZ).date()
+    return (today.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
 
 
 def _now_iso() -> str:
@@ -1336,10 +1346,21 @@ def _default_wordle_stats(
         "userId": uid,
         "email": _normalize_email(email),
         "rankScore": 0,
+        "rankScoreMonth": _month_key(),
+        "monthlyRankScores": {},
+        "lifetimeRankScore": 0,
         "combo": 0,
+        "currentStreak": 0,
         "wins": 0,
         "gamesPlayed": 0,
         "bestCombo": 0,
+        "bestStreak": 0,
+        "podiumFinishes": {
+            "first": 0,
+            "second": 0,
+            "third": 0,
+        },
+        "monthlyPlacements": {},
         "lastPlayedDate": None,
         "lastWinDate": None,
         "daily": {},
@@ -1361,6 +1382,48 @@ def _get_wordle_stats(
 
     changed = False
 
+    month_key = _month_key()
+    monthly_scores = stats.setdefault("monthlyRankScores", {})
+
+    # Migrate scores saved before monthlyRankScores was introduced. Without
+    # this, an existing current-month rankScore is treated as zero and then
+    # overwritten the first time the player or leaderboard is loaded.
+    if (
+        month_key not in monthly_scores
+        and stats.get("rankScoreMonth") == month_key
+        and int(stats.get("rankScore", 0)) > 0
+    ):
+        monthly_scores[month_key] = int(stats["rankScore"])
+        changed = True
+
+    current_month_score = int(monthly_scores.get(month_key, 0))
+
+    if stats.get("rankScoreMonth") != month_key:
+        stats["rankScoreMonth"] = month_key
+        changed = True
+
+    if int(stats.get("rankScore", 0)) != current_month_score:
+        stats["rankScore"] = current_month_score
+        changed = True
+
+    for field, default in (
+        ("lifetimeRankScore", 0),
+        ("currentStreak", int(stats.get("combo", 0))),
+        ("bestStreak", int(stats.get("bestCombo", 0))),
+        ("monthlyPlacements", {}),
+    ):
+        if field not in stats:
+            stats[field] = default
+            changed = True
+
+    if "podiumFinishes" not in stats:
+        stats["podiumFinishes"] = {
+            "first": 0,
+            "second": 0,
+            "third": 0,
+        }
+        changed = True
+
     if stats.get("userId") != uid:
         stats["userId"] = uid
         changed = True
@@ -1380,6 +1443,7 @@ def _get_wordle_stats(
         and int(stats.get("combo", 0)) != 0
     ):
         stats["combo"] = 0
+        stats["currentStreak"] = 0
         changed = True
 
     if changed:
@@ -1401,13 +1465,23 @@ def _save_wordle_stats(
 def _public_stats(
     stats: dict[str, Any],
 ) -> dict[str, Any]:
+    month_key = _month_key()
+    monthly_scores = stats.get("monthlyRankScores", {})
+    podium = stats.get("podiumFinishes", {})
+    rank_score = int(monthly_scores.get(month_key, 0))
+
+    # Keep responses compatible with legacy records until each one has been
+    # migrated by _get_wordle_stats().
+    if month_key not in monthly_scores and stats.get("rankScoreMonth") == month_key:
+        rank_score = int(stats.get("rankScore", 0))
+
     return {
         "userId": str(
             stats.get("userId") or ""
         ),
-        "rankScore": int(
-            stats.get("rankScore", 0)
-        ),
+        "rankScore": rank_score,
+        "rankScoreMonth": month_key,
+        "lifetimeRankScore": int(stats.get("lifetimeRankScore", 0)),
         "combo": int(stats.get("combo", 0)),
         "wins": int(stats.get("wins", 0)),
         "gamesPlayed": int(
@@ -1416,6 +1490,13 @@ def _public_stats(
         "bestCombo": int(
             stats.get("bestCombo", 0)
         ),
+        "currentStreak": int(stats.get("currentStreak", 0)),
+        "bestStreak": int(stats.get("bestStreak", 0)),
+        "podiumFinishes": {
+            "first": int(podium.get("first", 0)),
+            "second": int(podium.get("second", 0)),
+            "third": int(podium.get("third", 0)),
+        },
         "lastPlayedDate": stats.get(
             "lastPlayedDate"
         ),
@@ -1641,7 +1722,8 @@ def _letter_statuses(
 # Leaderboard helpers
 # ---------------------------------------------------------------------------
 
-def _build_leaderboard() -> list[dict[str, Any]]:
+def _build_leaderboard(month_key: str | None = None) -> list[dict[str, Any]]:
+    selected_month = month_key or _month_key()
     snapshots = (
         FIRESTORE_DB
         .collection("wordleUsers")
@@ -1679,6 +1761,17 @@ def _build_leaderboard() -> list[dict[str, Any]]:
             stats.get("gamesPlayed", 0)
         )
         wins = int(stats.get("wins", 0))
+        monthly_scores = stats.get("monthlyRankScores", {})
+        podium = stats.get("podiumFinishes", {})
+        rank_score = int(monthly_scores.get(selected_month, 0))
+
+        # Leaderboard reads do not pass through _get_wordle_stats(), so use
+        # the legacy score when it belongs to the requested month.
+        if (
+            selected_month not in monthly_scores
+            and stats.get("rankScoreMonth") == selected_month
+        ):
+            rank_score = int(stats.get("rankScore", 0))
 
         win_rate = (
             round((wins / games_played) * 100)
@@ -1692,9 +1785,8 @@ def _build_leaderboard() -> list[dict[str, Any]]:
                 "userId": uid,
                 "displayName": display_name,
                 "profilePicLink": _profile_picture_link(user),
-                "rankScore": int(
-                    stats.get("rankScore", 0)
-                ),
+                "rankScore": rank_score,
+                "rankScoreMonth": selected_month,
                 "combo": int(
                     stats.get("combo", 0)
                 ),
@@ -1704,6 +1796,11 @@ def _build_leaderboard() -> list[dict[str, Any]]:
                 "wins": wins,
                 "gamesPlayed": games_played,
                 "winRate": win_rate,
+                "podiumFinishes": {
+                    "first": int(podium.get("first", 0)),
+                    "second": int(podium.get("second", 0)),
+                    "third": int(podium.get("third", 0)),
+                },
             }
         )
 
@@ -1729,6 +1826,72 @@ def _build_leaderboard() -> list[dict[str, Any]]:
         player["rank"] = previous_rank
 
     return players
+
+
+def _get_monthly_podium(month_key: str) -> dict[str, Any] | None:
+    podium = _read_document("wordleMonthlyPodiums", month_key)
+    return podium if isinstance(podium, dict) else None
+
+
+def _finalize_wordle_month(month_key: str) -> dict[str, Any]:
+    if not re.fullmatch(r"\d{4}-\d{2}", month_key):
+        raise ValueError("month_key must use YYYY-MM")
+    if month_key >= _month_key():
+        raise ValueError("Only completed months can be finalized")
+
+    existing = _get_monthly_podium(month_key)
+    if existing:
+        return existing
+
+    eligible = [
+        player for player in _build_leaderboard(month_key)
+        if int(player.get("rankScore", 0)) > 0
+    ]
+    winners = []
+    placement_names = {1: "first", 2: "second", 3: "third"}
+
+    for placement, player in enumerate(eligible[:3], start=1):
+        winner = {
+            "rank": placement,
+            "userId": player["userId"],
+            "displayName": player["displayName"],
+            "profilePicLink": player.get("profilePicLink", ""),
+            "score": int(player.get("rankScore", 0)),
+            "wins": int(player.get("wins", 0)),
+        }
+        winners.append(winner)
+
+        uid = player["userId"]
+        stats = _get_wordle_stats(uid, "")
+        placements = stats.setdefault("monthlyPlacements", {})
+        if month_key not in placements:
+            name = placement_names[placement]
+            podium_counts = stats.setdefault("podiumFinishes", {})
+            podium_counts[name] = int(podium_counts.get(name, 0)) + 1
+            placements[month_key] = {
+                "rank": placement,
+                "score": winner["score"],
+                "awardedAt": _now_iso(),
+            }
+            _save_wordle_stats(uid, stats)
+
+    podium = {
+        "month": month_key,
+        "winners": winners,
+        "finalizedAt": _now_iso(),
+    }
+    _write_document("wordleMonthlyPodiums", month_key, podium)
+    return podium
+
+
+def _list_historical_wordle_podiums(limit: int = 24) -> list[dict[str, Any]]:
+    snapshots = (
+        FIRESTORE_DB.collection("wordleMonthlyPodiums")
+        .order_by("month", direction=firestore.Query.DESCENDING)
+        .limit(limit)
+        .stream()
+    )
+    return [snapshot.to_dict() or {} for snapshot in snapshots]
 
 
 # ---------------------------------------------------------------------------
