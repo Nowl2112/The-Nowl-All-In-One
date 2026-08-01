@@ -12,8 +12,7 @@ from services.riddle_ai_service import (
     judge_riddle_answer,
 )
 from services.riddle_service import (
-    LEADERBOARD_BEST_SCORES,
-    LEADERBOARD_WINDOW_DAYS,
+    MAX_COMBO,
     MAX_WRONG_GUESSES,
     all_time_score,
     answer_matches,
@@ -24,13 +23,76 @@ from services.riddle_service import (
     now_iso,
     public_riddle,
     public_stats,
-    rolling_score,
+    current_month_key,
+    monthly_score,
+    monthly_wins,
+    player_combo,
     save_player,
     today_key,
 )
 
 
 bp = Blueprint("riddles", __name__)
+
+
+def _archive_finished_months(users_by_id, player_documents):
+    """Create immutable monthly podium snapshots on the first later request."""
+    db = get_db()
+    active_month = current_month_key()
+    finished_months = set()
+    for _, player in player_documents:
+        for date_string in (player.get("daily") or {}):
+            try:
+                month = current_month_key(date_string)
+            except ValueError:
+                continue
+            if month < active_month:
+                finished_months.add(month)
+
+    for month in sorted(finished_months):
+        reference = db.collection("riddlePodiumHistory").document(month)
+        if reference.get().exists:
+            continue
+        standings = []
+        for uid, player in player_documents:
+            score = monthly_score(player, month)
+            wins = monthly_wins(player, month)
+            if score <= 0 and wins <= 0:
+                continue
+            user = users_by_id.get(uid, {})
+            email = player.get("email") or user.get("email") or ""
+            standings.append(
+                {
+                    "userId": uid,
+                    "displayName": user.get("displayName")
+                    or (email.split("@")[0] if email else "Player"),
+                    "profilePicLink": _profile_picture_link(user),
+                    "monthlyScore": score,
+                    "wins": wins,
+                }
+            )
+        standings.sort(
+            key=lambda item: (
+                -item["monthlyScore"],
+                -item["wins"],
+                item["displayName"].lower(),
+            )
+        )
+        podium = []
+        for rank, entry in enumerate(standings[:3], start=1):
+            podium.append({**entry, "rank": rank})
+        document = {
+            "month": month,
+            "podium": podium,
+            "totalPlayers": len(standings),
+            "archivedAt": now_iso(),
+        }
+        try:
+            reference.create(document)
+        except Exception:
+            # Another request may have archived the same month concurrently.
+            if not reference.get().exists:
+                raise
 
 
 def _identity():
@@ -139,6 +201,9 @@ def submit_riddle_guess():
         player["gamesPlayed"] = int(player.get("gamesPlayed", 0)) + 1
         player["lifetimePoints"] = int(
             player.get("lifetimePoints", 0)) + points
+        # A combo is a consecutive daily-win streak inside the current
+        # Singapore calendar month. The displayed/awarded value is capped at 10.
+        player["combo"] = player_combo(player, daily["date"])
     else:
         game["wrongGuesses"] = int(game.get("wrongGuesses", 0)) + 1
         if game["wrongGuesses"] >= MAX_WRONG_GUESSES:
@@ -150,6 +215,7 @@ def submit_riddle_guess():
                 }
             )
             player["gamesPlayed"] = int(player.get("gamesPlayed", 0)) + 1
+            player["combo"] = 0
 
     player.setdefault("daily", {})[daily["date"]] = game
     save_player(identity["uid"], player)
@@ -259,23 +325,29 @@ def get_riddle_leaderboard():
         snapshot.id: (snapshot.to_dict() or {})
         for snapshot in get_db().collection("users").stream()
     }
+    active_month = current_month_key()
+    player_documents = [
+        (snapshot.id, snapshot.to_dict() or {})
+        for snapshot in get_db().collection("riddleUsers").stream()
+    ]
+    _archive_finished_months(users_by_id, player_documents)
     players = []
-    for snapshot in get_db().collection("riddleUsers").stream():
-        player = snapshot.to_dict() or {}
-        user = users_by_id.get(snapshot.id, {})
+    for uid, player in player_documents:
+        user = users_by_id.get(uid, {})
         email = player.get("email") or user.get("email") or ""
         players.append(
             {
-                "userId": snapshot.id,
+                "userId": uid,
                 "displayName": user.get("displayName")
                 or (email.split("@")[0] if email else "Player"),
                 "profilePicLink": _profile_picture_link(user),
                 "allTimeScore": all_time_score(player),
-                "monthlyScore": rolling_score(player),
+                "monthlyScore": monthly_score(player, active_month),
                 # Compatibility aliases for older clients.
                 "lifetimePoints": all_time_score(player),
-                "rollingScore": rolling_score(player),
+                "rollingScore": monthly_score(player, active_month),
                 "wins": int(player.get("wins", 0)),
+                "combo": player_combo(player),
             }
         )
 
@@ -306,17 +378,45 @@ def get_riddle_leaderboard():
     for player in players:
         player["monthlyRank"] = monthly_ranks[player["userId"]]
 
+    monthly_podium = [
+        {**player, "rank": index}
+        for index, player in enumerate(monthly_players[:3], start=1)
+    ]
+
+    history = []
+    for snapshot in get_db().collection("riddlePodiumHistory").stream():
+        item = snapshot.to_dict() or {}
+        item.setdefault("month", snapshot.id)
+        history.append(item)
+    history.sort(key=lambda item: item.get("month", ""), reverse=True)
+
     return jsonify(
         {
             "leaderboard": players[:limit],
             "totalPlayers": len(players),
-            "scoringWindow": {
-                "days": LEADERBOARD_WINDOW_DAYS,
-                "bestScoresCounted": LEADERBOARD_BEST_SCORES,
-            },
+            "activeMonth": active_month,
+            "maxCombo": MAX_COMBO,
+            "monthlyPodium": monthly_podium,
+            "previousPodium": history[0] if history else None,
             "rankedBy": "allTimeScore",
         }
     )
+
+
+@bp.get("/api/games/riddles/podium-history")
+def get_riddle_podium_history():
+    identity, error = _identity()
+    if error:
+        return error
+
+    limit = max(1, min(request.args.get("limit", 12, type=int), 60))
+    history = []
+    for snapshot in get_db().collection("riddlePodiumHistory").stream():
+        item = snapshot.to_dict() or {}
+        item.setdefault("month", snapshot.id)
+        history.append(item)
+    history.sort(key=lambda item: item.get("month", ""), reverse=True)
+    return jsonify({"history": history[:limit]})
 
 
 @bp.post("/api/games/riddles/saved")

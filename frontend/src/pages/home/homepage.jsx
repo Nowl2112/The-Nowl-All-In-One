@@ -140,7 +140,16 @@ function PodiumAvatar({ player }) {
     );
 }
 
-function PreviousMonthPodium({ podium, status, error, onOpenHistory }) {
+function podiumWinners(podium) {
+    const entries = podium?.winners || podium?.podium;
+    return Array.isArray(entries) ? entries : [];
+}
+
+function podiumScore(player) {
+    return Number(player?.score ?? player?.monthlyScore ?? 0);
+}
+
+function PreviousMonthPodium({ podium, status, error, game, onOpenHistory }) {
     if (status === "loading") {
         return <div className="podium-state">Loading last month’s podium…</div>;
     }
@@ -149,7 +158,7 @@ function PreviousMonthPodium({ podium, status, error, onOpenHistory }) {
         return <div className="podium-state podium-state--error">{error}</div>;
     }
 
-    const winners = Array.isArray(podium?.winners) ? podium.winners : [];
+    const winners = podiumWinners(podium);
     if (!winners.length) {
         return (
             <div className="podium-empty">
@@ -186,7 +195,7 @@ function PreviousMonthPodium({ podium, status, error, onOpenHistory }) {
                         </span>
                         <PodiumAvatar player={winner} />
                         <strong>{winner.displayName || "Player"}</strong>
-                        <span>{Number(winner.score || 0).toLocaleString()} pts</span>
+                        <span>{podiumScore(winner).toLocaleString()} pts</span>
                     </article>
                 ))}
             </div>
@@ -194,7 +203,7 @@ function PreviousMonthPodium({ podium, status, error, onOpenHistory }) {
     );
 }
 
-function PodiumHistoryModal({ podiums, status, error, onClose }) {
+function PodiumHistoryModal({ podiums, status, error, game, onClose }) {
     useEffect(() => {
         const handleKeyDown = (event) => {
             if (event.key === "Escape") onClose();
@@ -210,7 +219,9 @@ function PodiumHistoryModal({ podiums, status, error, onClose }) {
             <section className="podium-modal__panel" role="dialog" aria-modal="true" aria-labelledby="podium-history-title">
                 <div className="podium-modal__header">
                     <div>
-                        <p className="home-section-label">Wordle seasons</p>
+                        <p className="home-section-label">
+                            {game === "wordle" ? "Wordle seasons" : "Riddle seasons"}
+                        </p>
                         <h2 id="podium-history-title">Podium history</h2>
                     </div>
                     <button type="button" onClick={onClose} aria-label="Close podium history">×</button>
@@ -224,15 +235,15 @@ function PodiumHistoryModal({ podiums, status, error, onClose }) {
                             <details key={podium.month || index} open={index === 0}>
                                 <summary>
                                     <strong>{formatPodiumMonth(podium.month)}</strong>
-                                    <span>{podium.winners?.[0]?.displayName ? `${podium.winners[0].displayName} won` : "No winner"}</span>
+                                    <span>{podiumWinners(podium)[0]?.displayName ? `${podiumWinners(podium)[0].displayName} won` : "No winner"}</span>
                                 </summary>
                                 <div className="podium-history-winners">
-                                    {(podium.winners || []).map((winner) => (
+                                    {podiumWinners(podium).map((winner) => (
                                         <div key={`${winner.rank}-${winner.userId}`}>
                                             <span>{["🥇", "🥈", "🥉"][winner.rank - 1] || `#${winner.rank}`}</span>
                                             <PodiumAvatar player={winner} />
                                             <strong>{winner.displayName || "Player"}</strong>
-                                            <span>{Number(winner.score || 0).toLocaleString()} pts</span>
+                                            <span>{podiumScore(winner).toLocaleString()} pts</span>
                                         </div>
                                     ))}
                                 </div>
@@ -257,6 +268,10 @@ function HomePage() {
     const [leaderboardStatus, setLeaderboardStatus] = useState("idle");
     const [leaderboardError, setLeaderboardError] = useState("");
     const [leaderboardGame, setLeaderboardGame] = useState("wordle");
+    const [leaderboardMeta, setLeaderboardMeta] = useState({
+        activeMonth: "",
+        maxCombo: 10,
+    });
     const [previousPodium, setPreviousPodium] = useState(null);
     const [podiumStatus, setPodiumStatus] = useState("idle");
     const [podiumError, setPodiumError] = useState("");
@@ -398,6 +413,14 @@ function HomePage() {
                         ? data.leaderboard
                         : [],
                 );
+                setLeaderboardMeta({
+                    activeMonth: data.activeMonth || "",
+                    maxCombo: Number(data.maxCombo || 10),
+                });
+                if (leaderboardGame === "riddles") {
+                    setPreviousPodium(data.previousPodium || null);
+                    setPodiumStatus("success");
+                }
                 setLeaderboardStatus("success");
             } catch (error) {
                 if (error?.name === "AbortError") return;
@@ -419,19 +442,26 @@ function HomePage() {
         setPodiumError("");
         try {
             const headers = await getAuthHeaders();
-            const response = await fetch(`${API_BASE_URL}/api/games/wordle/podiums/last-month`, {
+            const endpoint = leaderboardGame === "wordle"
+                ? "/api/games/wordle/podiums/last-month"
+                : "/api/games/riddles/podium-history?limit=1";
+            const response = await fetch(`${API_BASE_URL}${endpoint}`, {
                 headers, signal, cache: "no-store",
             });
             const data = await readJsonResponse(response);
             if (!response.ok) throw new Error(data.error || "Could not load last month’s podium.");
-            setPreviousPodium(data.podium || null);
+            setPreviousPodium(
+                leaderboardGame === "wordle"
+                    ? data.podium || null
+                    : data.history?.[0] || null,
+            );
             setPodiumStatus("success");
         } catch (error) {
             if (error?.name === "AbortError") return;
             setPodiumError(error?.message || "Could not load last month’s podium.");
             setPodiumStatus("error");
         }
-    }, [currentUser, getAuthHeaders]);
+    }, [currentUser, getAuthHeaders, leaderboardGame]);
 
     const loadPodiumHistory = useCallback(async () => {
         if (!currentUser || podiumHistoryStatus === "loading") return;
@@ -439,18 +469,30 @@ function HomePage() {
         setPodiumHistoryError("");
         try {
             const headers = await getAuthHeaders();
-            const response = await fetch(`${API_BASE_URL}/api/games/wordle/podiums?limit=24`, {
+            const endpoint = leaderboardGame === "wordle"
+                ? "/api/games/wordle/podiums?limit=24"
+                : "/api/games/riddles/podium-history?limit=24";
+            const response = await fetch(`${API_BASE_URL}${endpoint}`, {
                 headers, cache: "no-store",
             });
             const data = await readJsonResponse(response);
             if (!response.ok) throw new Error(data.error || "Could not load podium history.");
-            setPodiumHistory(Array.isArray(data.podiums) ? data.podiums : []);
+            const history = leaderboardGame === "wordle" ? data.podiums : data.history;
+            setPodiumHistory(Array.isArray(history) ? history : []);
             setPodiumHistoryStatus("success");
         } catch (error) {
             setPodiumHistoryError(error?.message || "Could not load podium history.");
             setPodiumHistoryStatus("error");
         }
-    }, [currentUser, getAuthHeaders, podiumHistoryStatus]);
+    }, [currentUser, getAuthHeaders, leaderboardGame, podiumHistoryStatus]);
+
+    useEffect(() => {
+        setPreviousPodium(null);
+        setPodiumStatus("idle");
+        setPodiumHistory([]);
+        setPodiumHistoryStatus("idle");
+        setIsPodiumHistoryOpen(false);
+    }, [leaderboardGame]);
 
     const openPodiumHistory = useCallback(() => {
         setIsPodiumHistoryOpen(true);
@@ -1472,14 +1514,13 @@ function HomePage() {
                         </div>
                     </div>
 
-                    {leaderboardGame === "wordle" && (
-                        <PreviousMonthPodium
-                            podium={previousPodium}
-                            status={podiumStatus}
-                            error={podiumError}
-                            onOpenHistory={openPodiumHistory}
-                        />
-                    )}
+                    <PreviousMonthPodium
+                        podium={previousPodium}
+                        status={podiumStatus}
+                        error={podiumError}
+                        game={leaderboardGame}
+                        onOpenHistory={openPodiumHistory}
+                    />
 
                     {leaderboardStatus === "loading" && (
                         <div className="leaderboard-state">
@@ -1508,22 +1549,20 @@ function HomePage() {
                                         <tr>
                                             <th>Rank</th>
                                             <th>Player</th>
-                                            <th>
-                                                {leaderboardGame === "wordle"
-                                                    ? "Points"
-                                                    : "All-time score"}
-                                            </th>
-                                            <th>
-                                                {leaderboardGame === "wordle"
-                                                    ? "Combo"
-                                                    : "Wins"}
-                                            </th>
-                                            {leaderboardGame === "wordle" && <th>Monthly podiums</th>}
-                                            <th>
-                                                {leaderboardGame === "wordle"
-                                                    ? "Lifetime win rate"
-                                                    : "30-day score"}
-                                            </th>
+                                            {leaderboardGame === "wordle" ? (
+                                                <>
+                                                    <th>Points</th>
+                                                    <th>Combo</th>
+                                                    <th>Monthly podiums</th>
+                                                    <th>Lifetime win rate</th>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <th>Current score</th>
+                                                    <th>Wins</th>
+                                                    <th>All-time score</th>
+                                                </>
+                                            )}
                                         </tr>
                                     </thead>
 
@@ -1599,36 +1638,40 @@ function HomePage() {
                                                         </div>
                                                     </td>
 
-                                                    <td>
-                                                        <strong>
-                                                            {leaderboardGame === "wordle"
-                                                                ? player.rankScore
-                                                                : (player.allTimeScore ??
-                                                                  player.lifetimePoints ??
-                                                                  0)}
-                                                        </strong>
-                                                    </td>
-                                                    <td>
-                                                        {leaderboardGame === "wordle"
-                                                            ? `×${player.combo ?? 0}`
-                                                            : (player.wins ?? 0)}
-                                                    </td>
-                                                    {leaderboardGame === "wordle" && (
-                                                        <td>
-                                                            <div className="leaderboard-podium-counts" aria-label="Monthly podium finishes">
-                                                                <span title="Monthly titles">🥇 {player.podiumFinishes?.first ?? 0}</span>
-                                                                <span title="Second-place finishes">🥈 {player.podiumFinishes?.second ?? 0}</span>
-                                                                <span title="Third-place finishes">🥉 {player.podiumFinishes?.third ?? 0}</span>
-                                                            </div>
-                                                        </td>
+                                                    {leaderboardGame === "wordle" ? (
+                                                        <>
+                                                            <td>
+                                                                <strong>{player.rankScore}</strong>
+                                                            </td>
+                                                            <td>
+                                                                {`×${Math.min(leaderboardMeta.maxCombo, player.combo ?? 0)}`}
+                                                            </td>
+                                                            <td>
+                                                                <div className="leaderboard-podium-counts" aria-label="Monthly podium finishes">
+                                                                    <span title="Monthly titles">🥇 {player.podiumFinishes?.first ?? 0}</span>
+                                                                    <span title="Second-place finishes">🥈 {player.podiumFinishes?.second ?? 0}</span>
+                                                                    <span title="Third-place finishes">🥉 {player.podiumFinishes?.third ?? 0}</span>
+                                                                </div>
+                                                            </td>
+                                                            <td>{`${player.winRate}%`}</td>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <td>
+                                                                <strong>
+                                                                    {player.monthlyScore ??
+                                                                        player.rollingScore ??
+                                                                        0}
+                                                                </strong>
+                                                            </td>
+                                                            <td>{player.wins ?? 0}</td>
+                                                            <td>
+                                                                {player.allTimeScore ??
+                                                                    player.lifetimePoints ??
+                                                                    0}
+                                                            </td>
+                                                        </>
                                                     )}
-                                                    <td>
-                                                        {leaderboardGame === "wordle"
-                                                            ? `${player.winRate}%`
-                                                            : (player.monthlyScore ??
-                                                              player.rollingScore ??
-                                                              0)}
-                                                    </td>
                                                 </tr>
                                             );
                                         })}
@@ -1643,6 +1686,7 @@ function HomePage() {
                     podiums={podiumHistory}
                     status={podiumHistoryStatus}
                     error={podiumHistoryError}
+                    game={leaderboardGame}
                     onClose={() => setIsPodiumHistoryOpen(false)}
                 />
             )}
