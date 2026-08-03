@@ -1,6 +1,32 @@
-from flask import Blueprint
+import re
 
-from core import *  # noqa: F403 - shared legacy helpers during migration
+import requests
+from flask import Blueprint, current_app, jsonify, request
+
+from core import (
+    MAX_ATTEMPTS,
+    MAX_COMBO,
+    _authenticated_identity,
+    _build_leaderboard,
+    _daily_answer,
+    _dictionary_api_is_real_word,
+    _finalize_wordle_month,
+    _get_monthly_podium,
+    _get_or_create_user,
+    _get_wordle_stats,
+    _letter_statuses,
+    _list_historical_wordle_podiums,
+    _month_key,
+    _now_iso,
+    _previous_month_key,
+    _profile_picture_link,
+    _public_stats,
+    _require_firestore,
+    _save_wordle_stats,
+    _today_key,
+    _verify_cron_secret,
+    _yesterday_key,
+)
 
 
 bp = Blueprint("wordle", __name__)
