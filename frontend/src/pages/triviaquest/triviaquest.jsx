@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import triviaMomo from "../../assets/trivia-momo.png";
 import kotaroImage from "../../assets/kotaro.png";
 import { useAuth } from "../../context/authContext.jsx";
-import "./triviaQuest.css";
+import "./triviaquest.css";
 
 const API_BASE_URL =
     import.meta.env.VITE_API_BASE_URL ||

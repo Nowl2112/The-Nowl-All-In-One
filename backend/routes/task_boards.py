@@ -1,4 +1,3 @@
-"""HTTP routes for this feature area."""
 
 from flask import Blueprint
 
@@ -86,7 +85,6 @@ def delete_task_board_column(board_id: str, column_id: str):
     }), 200
 
 
-
 @bp.post("/api/task-boards")
 def create_task_board():
     firestore_error = _require_firestore()
@@ -130,10 +128,10 @@ def create_task_board():
     try:
         board_ref.set(board)
     except Exception as database_error:
-        current_app.logger.exception("Could not create task board: %s", database_error)
+        current_app.logger.exception(
+            "Could not create task board: %s", database_error)
         return jsonify({"error": "Could not create task board"}), 500
     return jsonify({"message": "Task board created", "board": _task_board_response(board_ref.id, board)}), 201
-
 
 
 @bp.get("/api/task-boards")
@@ -155,12 +153,12 @@ def get_task_boards():
             response_board["currentUserRole"] = role
             boards.append(response_board)
     except Exception as database_error:
-        current_app.logger.exception("Could not load task boards: %s", database_error)
+        current_app.logger.exception(
+            "Could not load task boards: %s", database_error)
         return jsonify({"error": "Could not load task boards"}), 500
     boards.sort(key=lambda board: str(
         board.get("updatedAt") or ""), reverse=True)
     return jsonify({"boards": boards, "count": len(boards)})
-
 
 
 @bp.get("/api/task-boards/<board_id>")
@@ -185,7 +183,6 @@ def get_task_board(board_id: str):
     response_board["currentUserRole"] = _task_board_user_role(
         board, identity["uid"])
     return jsonify({"board": response_board, "cards": cards, "cardCount": len(cards)})
-
 
 
 @bp.patch("/api/task-boards/<board_id>")
@@ -233,10 +230,10 @@ def update_task_board(board_id: str):
     try:
         board_ref.set(updates, merge=True)
     except Exception as database_error:
-        current_app.logger.exception("Could not update task board: %s", database_error)
+        current_app.logger.exception(
+            "Could not update task board: %s", database_error)
         return jsonify({"error": "Could not update task board"}), 500
     return jsonify({"message": "Task board updated", "board": _task_board_response(board_id, {**board, **updates})})
-
 
 
 @bp.delete("/api/task-boards/<board_id>")
@@ -261,10 +258,10 @@ def delete_task_board(board_id: str):
             batch.commit()
         board_ref.delete()
     except Exception as database_error:
-        current_app.logger.exception("Could not delete task board: %s", database_error)
+        current_app.logger.exception(
+            "Could not delete task board: %s", database_error)
         return jsonify({"error": "Could not delete task board"}), 500
     return jsonify({"message": "Task board deleted", "deletedBoard": {"id": board_id, "name": board.get("name"), "deletedCardCount": len(card_snapshots)}})
-
 
 
 @bp.post("/api/task-boards/<board_id>/members")
@@ -306,10 +303,10 @@ def add_task_board_member(board_id: str):
         board_ref.set(
             {"members": members, "updatedAt": _now_iso()}, merge=True)
     except Exception as database_error:
-        current_app.logger.exception("Could not add board member: %s", database_error)
+        current_app.logger.exception(
+            "Could not add board member: %s", database_error)
         return jsonify({"error": "Could not add board member"}), 500
     return jsonify({"message": "Board member saved", "member": members[member_uid]})
-
 
 
 @bp.delete("/api/task-boards/<board_id>/members/<member_uid>")
@@ -337,7 +334,6 @@ def remove_task_board_member(board_id: str, member_uid: str):
             "Could not remove board member: %s", database_error)
         return jsonify({"error": "Could not remove board member"}), 500
     return jsonify({"message": "Board member removed", "removedMember": removed_member})
-
 
 
 @bp.post("/api/task-boards/<board_id>/cards")
@@ -417,10 +413,10 @@ def create_task_board_card(board_id: str):
         card_ref.set(card)
         board_ref.set({"updatedAt": now}, merge=True)
     except Exception as database_error:
-        current_app.logger.exception("Could not create board card: %s", database_error)
+        current_app.logger.exception(
+            "Could not create board card: %s", database_error)
         return jsonify({"error": "Could not create board card"}), 500
     return jsonify({"message": "Task board card created", "card": _task_board_card_response(card_ref.id, card)}), 201
-
 
 
 @bp.patch("/api/task-boards/<board_id>/cards/<card_id>")
@@ -509,10 +505,10 @@ def update_task_board_card(board_id: str, card_id: str):
         card_ref.set(updates, merge=True)
         board_ref.set({"updatedAt": updates["updatedAt"]}, merge=True)
     except Exception as database_error:
-        current_app.logger.exception("Could not update board card: %s", database_error)
+        current_app.logger.exception(
+            "Could not update board card: %s", database_error)
         return jsonify({"error": "Could not update board card"}), 500
     return jsonify({"message": "Task board card updated", "card": _task_board_card_response(card_id, {**card, **updates})})
-
 
 
 @bp.delete("/api/task-boards/<board_id>/cards/<card_id>")
@@ -538,10 +534,10 @@ def delete_task_board_card(board_id: str, card_id: str):
         card_ref.delete()
         board_ref.set({"updatedAt": _now_iso()}, merge=True)
     except Exception as database_error:
-        current_app.logger.exception("Could not delete board card: %s", database_error)
+        current_app.logger.exception(
+            "Could not delete board card: %s", database_error)
         return jsonify({"error": "Could not delete board card"}), 500
     return jsonify({"message": "Task board card deleted", "deletedCard": {"id": card_id, "title": card.get("title"), "boardId": board_id}})
-
 
 
 @bp.post("/api/task-boards/<board_id>/import-calendar")
@@ -659,4 +655,3 @@ def import_calendar_items_to_task_board(board_id: str):
         "skipped": skipped_items,
         "skippedCount": len(skipped_items),
     }), 201 if imported_cards else 200
-
