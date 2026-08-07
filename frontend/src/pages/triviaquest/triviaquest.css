@@ -1,0 +1,2386 @@
+:root {
+    --quest-ink: #191919;
+    --quest-muted: #5f7f96;
+
+    --quest-white: #ffffff;
+    --quest-cream: #f4efe8;
+
+    --quest-blue-light: #edf6fb;
+    --quest-blue-soft: #dceef8;
+    --quest-blue-border: #b9d9ed;
+    --quest-blue: #74b8e6;
+    --quest-blue-dark: #428fca;
+    --quest-blue-deep: #183b56;
+
+    --quest-green: #42a66c;
+    --quest-red: #d9534f;
+
+    --quest-border: #1f1f1f;
+}
+
+
+/* =========================================================
+   BASE
+   ========================================================= */
+
+* {
+    box-sizing: border-box;
+}
+
+button,
+input,
+select {
+    font: inherit;
+}
+
+.trivia-quest-page {
+    min-height: 100vh;
+    padding: 24px;
+    color: var(--quest-ink);
+    background:
+        radial-gradient(
+            circle at 8% 7%,
+            rgba(116, 184, 230, 0.18),
+            transparent 26%
+        ),
+        var(--quest-cream);
+    font-family:
+        Inter,
+        ui-sans-serif,
+        system-ui,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif;
+}
+
+.quest-shell {
+    width: min(1120px, 100%);
+    margin: 0 auto;
+}
+
+
+/* =========================================================
+   SHARED FLEX LAYOUTS
+   ========================================================= */
+
+.quest-nav,
+.quest-brand,
+.quest-section-heading,
+.quest-health-label,
+.quest-question__meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+
+/* =========================================================
+   NAVIGATION
+   ========================================================= */
+
+.quest-nav {
+    margin-bottom: 22px;
+}
+
+.quest-brand {
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font-size: 23px;
+    font-weight: 950;
+}
+
+.quest-brand img {
+    width: auto;
+    height: 58px;
+    object-fit: contain;
+}
+
+
+/* =========================================================
+   BUTTONS
+   ========================================================= */
+
+.quest-button {
+    min-height: 44px;
+    padding: 0 17px;
+    border: 2px solid var(--quest-border);
+    border-radius: 13px;
+    background: var(--quest-white);
+    color: var(--quest-ink);
+    box-shadow: 3px 3px 0 var(--quest-border);
+    cursor: pointer;
+    font-weight: 900;
+}
+
+.quest-button:hover:not(:disabled) {
+    transform: translate(2px, 2px);
+    box-shadow: 1px 1px 0 var(--quest-border);
+}
+
+.quest-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.quest-button--primary {
+    background: var(--quest-blue);
+}
+
+.quest-button--wide {
+    width: 100%;
+    margin-top: 20px;
+}
+
+
+/* =========================================================
+   HERO
+   ========================================================= */
+
+.quest-hero {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 30px;
+
+    min-height: 260px;
+    padding: clamp(32px, 6vw, 65px);
+
+    border: 2px solid var(--quest-border);
+    border-radius: 30px;
+
+    background: linear-gradient(
+        135deg,
+        var(--quest-white),
+        var(--quest-blue-light)
+    );
+
+    box-shadow: 9px 9px 0 rgba(25, 25, 25, 0.13);
+    overflow: hidden;
+}
+
+.quest-hero h1 {
+    margin: 0;
+    font-size: clamp(52px, 9vw, 92px);
+    line-height: 0.95;
+    letter-spacing: -0.065em;
+}
+
+.quest-hero p:last-child {
+    max-width: 650px;
+    margin: 18px 0 0;
+    color: var(--quest-muted);
+    font-size: 18px;
+    line-height: 1.65;
+}
+
+.quest-eyebrow {
+    margin: 0 0 8px;
+    color: var(--quest-blue-dark);
+    font-size: 12px;
+    font-weight: 950;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+}
+
+.quest-hero__art {
+    position: relative;
+    z-index: 1;
+
+    display: grid;
+    width: 270px;
+    min-height: 190px;
+
+    place-items: end center;
+    align-self: stretch;
+}
+
+.quest-hero__art > img {
+    display: block;
+    width: min(220px, 100%);
+    max-height: 235px;
+    object-fit: contain;
+    object-position: center bottom;
+    filter: drop-shadow(0 12px 10px rgba(24, 59, 86, 0.16));
+}
+
+.quest-hero__seal {
+    display: grid;
+    width: 150px;
+    height: 150px;
+
+    place-content: center;
+
+    border: 3px solid var(--quest-border);
+    border-radius: 50%;
+
+    background: var(--quest-blue);
+    box-shadow: 7px 7px 0 var(--quest-border);
+
+    text-align: center;
+    transform: rotate(4deg);
+}
+
+.quest-hero__seal span {
+    font-size: 58px;
+    font-weight: 950;
+    line-height: 0.85;
+}
+
+.quest-hero__seal small {
+    margin-top: 8px;
+    font-weight: 900;
+    text-transform: uppercase;
+}
+
+.quest-hero__art .quest-hero__seal {
+    position: absolute;
+    right: -18px;
+    bottom: -8px;
+
+    width: 105px;
+    height: 105px;
+}
+
+.quest-hero__art .quest-hero__seal span {
+    font-size: 42px;
+}
+
+.quest-hero__art .quest-hero__seal small {
+    font-size: 10px;
+}
+
+
+/* =========================================================
+   PANELS
+   ========================================================= */
+
+.quest-panel,
+.quest-arena {
+    margin-top: 24px;
+    padding: clamp(24px, 4vw, 40px);
+
+    border: 2px solid var(--quest-border);
+    border-radius: 25px;
+
+    background: var(--quest-white);
+
+    box-shadow: 6px 6px 0 rgba(25, 25, 25, 0.1);
+}
+
+.quest-panel h2,
+.quest-arena h2 {
+    margin: 0;
+    font-size: clamp(29px, 4vw, 42px);
+    letter-spacing: -0.045em;
+}
+
+.quest-panel p {
+    color: var(--quest-muted);
+    line-height: 1.55;
+}
+
+
+/* =========================================================
+   NOTICES
+   ========================================================= */
+
+.quest-notice,
+.quest-loading {
+    margin-top: 22px;
+    padding: 15px 18px;
+
+    border: 2px solid var(--quest-blue);
+    border-radius: 14px;
+
+    background: var(--quest-blue-light);
+
+    font-weight: 800;
+    text-align: center;
+}
+
+.quest-notice--error {
+    border-color: var(--quest-blue-dark);
+    color: var(--quest-blue-deep);
+}
+
+.quest-loading {
+    border-color: var(--quest-blue-border);
+    color: var(--quest-muted);
+}
+
+
+/* =========================================================
+   INVITE / CREATE
+   ========================================================= */
+
+.quest-invite-panel {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 22px;
+
+    background: var(--quest-cream);
+}
+
+.quest-invite-mark {
+    display: grid;
+    width: 64px;
+    height: 64px;
+
+    place-items: center;
+
+    border: 2px solid var(--quest-border);
+    border-radius: 18px;
+
+    background: var(--quest-blue);
+    box-shadow: 3px 3px 0 var(--quest-border);
+
+    font-size: 28px;
+}
+
+.quest-invite-panel p {
+    margin: 6px 0 0;
+}
+
+.quest-create-panel {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(330px, 0.8fr);
+    align-items: end;
+    gap: 35px;
+}
+
+.quest-create-panel form label,
+.quest-share-box label {
+    display: block;
+    margin-bottom: 8px;
+    font-size: 13px;
+    font-weight: 900;
+}
+
+.quest-create-panel form > div {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 10px;
+}
+
+.quest-create-panel input,
+.quest-share-box input,
+.quest-heal-card select {
+    width: 100%;
+    min-height: 48px;
+    padding: 0 14px;
+
+    border: 2px solid var(--quest-border);
+    border-radius: 12px;
+
+    background: var(--quest-white);
+    outline: none;
+}
+
+.quest-create-panel input:focus,
+.quest-share-box input:focus,
+.quest-heal-card select:focus {
+    box-shadow: 0 0 0 4px rgba(116, 184, 230, 0.28);
+}
+
+.quest-count {
+    display: grid;
+    min-width: 72px;
+    height: 48px;
+
+    place-items: center;
+
+    border: 2px solid var(--quest-border);
+    border-radius: 15px;
+
+    background: var(--quest-blue-light);
+
+    font-weight: 950;
+}
+
+
+/* =========================================================
+   ROSTER
+   ========================================================= */
+
+.quest-roster {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: 28px;
+}
+
+.quest-roster article {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+
+    padding: 17px 10px;
+
+    border: 2px solid var(--quest-blue-border);
+    border-radius: 17px;
+
+    background: var(--quest-white);
+
+    text-align: center;
+}
+
+.quest-roster article div {
+    min-width: 0;
+}
+
+.quest-roster article strong,
+.quest-roster article span {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.quest-roster article strong {
+    font-size: 13px;
+}
+
+.quest-roster article div span {
+    margin-top: 3px;
+    color: var(--quest-muted);
+    font-size: 10px;
+    font-weight: 800;
+}
+
+.quest-roster__empty {
+    border-style: dashed !important;
+    color: var(--quest-muted);
+}
+
+.quest-roster__empty > span {
+    display: grid;
+    width: 48px;
+    height: 48px;
+
+    place-items: center;
+
+    border-radius: 50%;
+    background: var(--quest-blue-light);
+
+    font-size: 24px;
+}
+
+
+/* =========================================================
+   AVATARS
+   ========================================================= */
+
+.quest-avatar {
+    position: relative;
+
+    display: grid;
+    width: 50px;
+    height: 50px;
+    flex: 0 0 50px;
+
+    place-items: center;
+    overflow: hidden;
+
+    border: 2px solid var(--quest-border);
+    border-radius: 50%;
+
+    background: var(--quest-blue-soft);
+
+    font-weight: 950;
+}
+
+.quest-avatar img {
+    position: absolute;
+    inset: 0;
+
+    width: 100%;
+    height: 100%;
+
+    object-fit: cover;
+}
+
+
+/* =========================================================
+   LOBBY
+   ========================================================= */
+
+.quest-lobby-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    margin-top: 25px;
+}
+
+.quest-waiting {
+    margin: 24px 0 0;
+    padding: 15px;
+
+    border-radius: 13px;
+
+    background: var(--quest-blue-light);
+
+    text-align: center;
+    font-weight: 800;
+}
+
+.quest-share-box {
+    margin-top: 22px;
+    padding: 18px;
+
+    border: 2px dashed var(--quest-blue-border);
+    border-radius: 16px;
+
+    background: var(--quest-blue-light);
+}
+
+.quest-share-box > div {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: 9px;
+}
+
+.quest-share-box button,
+.quest-share-box a {
+    display: grid;
+    min-height: 48px;
+    padding: 0 15px;
+
+    place-items: center;
+
+    border: 2px solid var(--quest-border);
+    border-radius: 12px;
+
+    background: var(--quest-white);
+    color: inherit;
+
+    cursor: pointer;
+    font-weight: 900;
+    text-decoration: none;
+}
+
+
+/* =========================================================
+   HEALTH BARS
+   ========================================================= */
+
+.quest-health-label {
+    margin: 27px 0 8px;
+}
+
+.quest-health-label span {
+    font-weight: 850;
+}
+
+.quest-health-track {
+    height: 10px;
+    overflow: hidden;
+
+    border-radius: 999px;
+    background: var(--quest-blue-soft);
+}
+
+.quest-health-track span {
+    display: block;
+    width: 0;
+    height: 100%;
+
+    border-radius: inherit;
+
+    /* PLAYER / TEAMMATE HP */
+    background: var(--quest-green);
+
+    transition: width 0.3s ease;
+}
+
+
+/* ENEMY / BOSS HP */
+
+.quest-health-track--boss {
+    height: 17px;
+    border: 2px solid var(--quest-white);
+    background: rgba(255, 255, 255, 0.22);
+}
+
+.quest-health-track--boss span {
+    background: var(--quest-red);
+}
+
+
+/* =========================================================
+   FALLBACK ARENA
+   ========================================================= */
+
+.quest-arena {
+    position: relative;
+
+    display: grid;
+    min-height: 330px;
+    grid-template-columns: minmax(0, 1fr) minmax(250px, 360px);
+    align-items: center;
+    gap: 30px;
+
+    overflow: hidden;
+
+    background: var(--quest-blue-deep);
+    color: var(--quest-white);
+}
+
+.quest-arena .quest-eyebrow {
+    color: var(--quest-blue);
+}
+
+.quest-arena h2 {
+    font-size: clamp(38px, 6vw, 64px);
+}
+
+.quest-battle-stats {
+    color: var(--quest-blue-soft);
+    font-size: 13px;
+    font-weight: 800;
+}
+
+
+/* =========================================================
+   BOSS
+   ========================================================= */
+
+.quest-boss {
+    position: relative;
+
+    display: grid;
+    width: min(280px, 90%);
+    aspect-ratio: 1;
+
+    place-items: center;
+    justify-self: center;
+
+    border: 5px solid var(--quest-blue-deep);
+    border-radius: 48% 48% 44% 44%;
+
+    background: var(--quest-blue-dark);
+
+    box-shadow: 14px 18px 0 rgba(0, 0, 0, 0.2);
+}
+
+.quest-boss__ear {
+    position: absolute;
+    z-index: 0;
+    top: -18px;
+
+    width: 70px;
+    height: 75px;
+
+    border: 5px solid var(--quest-blue-deep);
+    background: var(--quest-blue-dark);
+
+    transform: rotate(45deg);
+}
+
+.quest-boss__ear--left {
+    left: 18px;
+}
+
+.quest-boss__ear--right {
+    right: 18px;
+}
+
+.quest-boss__face {
+    position: relative;
+    z-index: 1;
+
+    display: flex;
+    align-items: center;
+    gap: 25px;
+
+    font-size: 35px;
+}
+
+.quest-boss__face b {
+    color: var(--quest-white);
+    font-size: 52px;
+}
+
+.quest-boss--asset {
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+.quest-boss--asset img {
+    display: block;
+    width: 100%;
+    height: 100%;
+
+    object-fit: contain;
+    object-position: center bottom;
+
+    filter: drop-shadow(0 13px 7px rgba(0, 0, 0, 0.28));
+}
+
+
+/* =========================================================
+   RESULTS
+   ========================================================= */
+
+.quest-result-banner {
+    position: absolute;
+    z-index: 4;
+    right: 24px;
+    bottom: 24px;
+    left: 24px;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+
+    padding: 14px;
+
+    border: 2px solid var(--quest-white);
+    border-radius: 14px;
+
+    background: rgba(66, 143, 202, 0.94);
+}
+
+
+/* =========================================================
+   BATTLEFIELD
+   ========================================================= */
+
+.quest-battle-stage {
+    position: relative;
+
+    margin-top: 24px;
+    padding: 0;
+
+    aspect-ratio: 16 / 9;
+    min-height: 0;
+
+    overflow: hidden;
+    isolation: isolate;
+
+    border: 2px solid var(--quest-border);
+    border-radius: 28px;
+
+    background:
+        radial-gradient(
+            circle at 38% 30%,
+            rgba(116, 184, 230, 0.33),
+            transparent 26%
+        ),
+        var(--quest-blue-dark);
+
+    background-position: center;
+    background-size: 100% 100%;
+
+    box-shadow: 8px 8px 0 rgba(25, 25, 25, 0.14);
+
+    color: var(--quest-white);
+}
+
+.quest-battle-stage.has-battlefield-art {
+    background-position: center;
+    background-size: 100% 100%;
+}
+
+.quest-battle-stage::before {
+    position: absolute;
+    z-index: 1;
+    inset: 0;
+
+    background: linear-gradient(
+        180deg,
+        rgba(25, 25, 25, 0.24) 0%,
+        rgba(25, 25, 25, 0) 25%,
+        rgba(25, 25, 25, 0) 72%,
+        rgba(25, 25, 25, 0.14) 100%
+    );
+
+    pointer-events: none;
+    content: "";
+}
+
+
+/* =========================================================
+   BATTLE HUD
+   ========================================================= */
+
+.quest-battle-hud {
+    position: absolute;
+    z-index: 5;
+    top: 0;
+    right: 0;
+    left: 0;
+
+    display: grid;
+    grid-template-columns: minmax(220px, 0.7fr) minmax(360px, 1.3fr);
+    align-items: end;
+    gap: 30px;
+
+    padding: 22px 28px 26px;
+
+    background: linear-gradient(
+        180deg,
+        rgba(25, 25, 25, 0.56),
+        rgba(25, 25, 25, 0)
+    );
+
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+}
+
+.quest-battle-hud .quest-eyebrow {
+    color: var(--quest-blue-light);
+}
+
+.quest-battle-hud h2 {
+    margin: 0;
+    font-size: clamp(30px, 4vw, 46px);
+    letter-spacing: -0.045em;
+}
+
+.quest-boss-health {
+    width: 100%;
+}
+
+.quest-battle-hud .quest-boss-health {
+    padding: 10px 14px 12px;
+
+    border-radius: 14px;
+
+    background: rgba(25, 25, 25, 0.35);
+
+    backdrop-filter: blur(3px);
+}
+
+.quest-battle-hud .quest-health-label {
+    margin: 0 0 7px;
+}
+
+
+/* =========================================================
+   BATTLE POSITIONS
+   ========================================================= */
+
+.quest-battlefield {
+    position: absolute;
+    z-index: 2;
+    inset: 0;
+}
+
+.quest-enemy-side {
+    position: absolute;
+    bottom: 7%;
+    left: 5%;
+
+    display: flex;
+    width: 25%;
+    height: 48%;
+
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+}
+
+.quest-enemy-side .quest-boss {
+    width: 100%;
+    max-width: none;
+    aspect-ratio: auto;
+}
+
+.quest-combat-label {
+    padding: 5px 13px;
+
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    border-radius: 999px;
+
+    background: rgba(25, 25, 25, 0.72);
+
+    backdrop-filter: blur(3px);
+
+    font-size: 11px;
+    font-weight: 900;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.quest-versus {
+    position: absolute;
+    z-index: 3;
+    bottom: 28%;
+    left: 32%;
+
+    display: grid;
+    width: 50px;
+    height: 50px;
+
+    place-items: center;
+
+    border: 2px solid var(--quest-white);
+    border-radius: 50%;
+
+    background: var(--quest-blue-deep);
+    color: var(--quest-white);
+
+    font-size: 14px;
+    font-weight: 950;
+
+    transform: rotate(-8deg);
+}
+
+
+/* =========================================================
+   PARTY FORMATION
+   ========================================================= */
+
+.quest-party-formation {
+    position: absolute;
+    right: 4%;
+    bottom: 7%;
+
+    display: flex;
+    width: 59%;
+
+    align-items: flex-end;
+    justify-content: center;
+    gap: clamp(8px, 1.3vw, 18px);
+}
+
+.quest-combatant,
+.quest-combatant:nth-child(2),
+.quest-combatant:nth-child(4),
+.quest-combatant:nth-child(5) {
+    width: min(112px, 18%);
+    padding: 0;
+
+    border: 0;
+    border-radius: 0;
+
+    background: transparent;
+
+    box-shadow: none;
+    text-align: center;
+    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+
+    transform: none;
+
+    transition:
+        transform 0.2s ease,
+        opacity 0.2s ease;
+}
+
+.quest-combatant.is-down {
+    opacity: 0.45;
+    filter: grayscale(1);
+    transform: translateY(12px) rotate(-4deg);
+}
+
+.quest-combatant .quest-avatar {
+    width: clamp(55px, 6.5vw, 82px);
+    height: clamp(55px, 6.5vw, 82px);
+
+    margin: 0 auto 7px;
+
+    border: 3px solid var(--quest-white);
+
+    background: var(--quest-blue-soft);
+
+    box-shadow: 0 5px 13px rgba(0, 0, 0, 0.32);
+}
+
+.quest-combatant > strong {
+    display: block;
+
+    overflow: hidden;
+    padding: 3px 5px;
+
+    border-radius: 7px;
+
+    background: rgba(25, 25, 25, 0.62);
+
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.quest-combatant .quest-health-track {
+    height: 8px;
+    margin: 6px 4px 0;
+
+    border: 1px solid rgba(255, 255, 255, 0.75);
+
+    background: rgba(25, 25, 25, 0.55);
+}
+
+/* Explicitly ensure teammate HP is green. */
+.quest-combatant .quest-health-track span {
+    background: var(--quest-green);
+}
+
+.quest-combatant small {
+    display: inline-block;
+
+    margin-top: 3px;
+    padding: 2px 5px;
+
+    border-radius: 6px;
+
+    background: rgba(25, 25, 25, 0.62);
+    color: var(--quest-white);
+
+    font-size: 8px;
+}
+
+
+/* =========================================================
+   DAMAGE BOARD
+   ========================================================= */
+
+.quest-damage-board {
+    align-self: stretch;
+    min-width: 0;
+    padding: 17px;
+
+    border: 2px solid rgba(255, 255, 255, 0.32);
+    border-radius: 19px;
+
+    background: rgba(25, 25, 25, 0.72);
+
+    box-shadow: 0 14px 30px rgba(0, 0, 0, 0.2);
+}
+
+.quest-damage-board__heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+
+    padding-bottom: 14px;
+
+    border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.quest-damage-board__heading div span,
+.quest-damage-board__heading div strong {
+    display: block;
+}
+
+.quest-damage-board__heading div span {
+    color: var(--quest-blue-soft);
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+}
+
+.quest-damage-board__heading div strong {
+    margin-top: 3px;
+    color: var(--quest-blue);
+    font-size: 25px;
+}
+
+.quest-damage-board__heading > span {
+    font-size: 26px;
+}
+
+.quest-damage-list {
+    display: grid;
+    gap: 7px;
+    margin-top: 12px;
+}
+
+.quest-damage-list article {
+    display: grid;
+    grid-template-columns: 20px 34px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+
+    padding: 8px;
+
+    border: 1px solid transparent;
+    border-radius: 11px;
+}
+
+.quest-damage-list article.is-you {
+    border-color: var(--quest-blue);
+    background: rgba(116, 184, 230, 0.14);
+}
+
+.quest-damage-list .quest-avatar {
+    width: 34px;
+    height: 34px;
+    flex-basis: 34px;
+
+    border-color: rgba(255, 255, 255, 0.75);
+
+    font-size: 10px;
+}
+
+.quest-damage-rank {
+    color: var(--quest-blue-border);
+    font-size: 11px;
+    font-weight: 950;
+    text-align: center;
+}
+
+.quest-damage-list article > div {
+    min-width: 0;
+}
+
+.quest-damage-list article > div strong,
+.quest-damage-list article > div small {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.quest-damage-list article > div strong {
+    font-size: 11px;
+}
+
+.quest-damage-list article > div small {
+    margin-top: 2px;
+    color: var(--quest-blue-border);
+    font-size: 8px;
+}
+
+.quest-damage-list article > strong:last-child {
+    color: var(--quest-white);
+    font-size: 12px;
+}
+
+.quest-damage-board > p {
+    margin: 13px 0 0;
+    padding-top: 12px;
+
+    border-top: 1px solid rgba(255, 255, 255, 0.14);
+
+    color: var(--quest-blue-border);
+
+    font-size: 9px;
+    font-weight: 800;
+    text-align: center;
+}
+
+
+/* =========================================================
+   COMMAND PANEL
+   ========================================================= */
+
+.quest-command-panel {
+    position: relative;
+    min-height: 410px;
+    padding-top: 55px;
+}
+
+.quest-command-panel__label {
+    position: absolute;
+    top: 0;
+    right: 0;
+    left: 0;
+
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+
+    min-height: 44px;
+    padding: 0 24px;
+
+    border-bottom: 2px solid var(--quest-border);
+    border-radius: 22px 22px 0 0;
+
+    background: var(--quest-blue-light);
+}
+
+.quest-command-panel__label span {
+    color: var(--quest-blue-dark);
+    font-size: 11px;
+    font-weight: 950;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.quest-command-panel__label small {
+    color: var(--quest-muted);
+    font-weight: 850;
+}
+
+.quest-command-panel .quest-question-picker,
+.quest-command-panel .quest-question,
+.quest-command-panel .quest-actions {
+    width: min(820px, 100%);
+    margin: 0 auto;
+}
+
+
+/* =========================================================
+   CONTRIBUTION PANEL
+   ========================================================= */
+
+.quest-contribution-panel {
+    padding: clamp(22px, 4vw, 34px);
+}
+
+.quest-contribution-total {
+    min-width: 150px;
+    padding: 13px 18px;
+
+    border: 2px solid var(--quest-border);
+    border-radius: 15px;
+
+    background: var(--quest-blue-light);
+
+    box-shadow: 3px 3px 0 var(--quest-border);
+
+    text-align: right;
+}
+
+.quest-contribution-total span,
+.quest-contribution-total strong {
+    display: block;
+}
+
+.quest-contribution-total span {
+    color: var(--quest-muted);
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.quest-contribution-total strong {
+    margin-top: 3px;
+    font-size: 25px;
+}
+
+.quest-contribution-list {
+    display: grid;
+    gap: 9px;
+    margin-top: 23px;
+}
+
+.quest-contribution-list article {
+    display: grid;
+    grid-template-columns:
+        48px 46px minmax(150px, 1fr)
+        minmax(85px, 0.35fr)
+        minmax(85px, 0.35fr);
+
+    align-items: center;
+    gap: 13px;
+
+    padding: 12px 16px;
+
+    border: 2px solid var(--quest-blue-border);
+    border-radius: 15px;
+
+    background: var(--quest-white);
+}
+
+.quest-contribution-list article.is-you {
+    border-color: var(--quest-border);
+    background: var(--quest-blue-light);
+
+    box-shadow: 3px 3px 0 rgba(24, 59, 86, 0.12);
+}
+
+.quest-contribution-list .quest-avatar {
+    width: 42px;
+    height: 42px;
+    flex-basis: 42px;
+}
+
+.quest-contribution-list .quest-damage-rank {
+    color: var(--quest-blue-dark);
+    font-size: 15px;
+}
+
+.quest-contribution-list article > div:nth-child(3) strong,
+.quest-contribution-list article > div:nth-child(3) small {
+    display: block;
+}
+
+.quest-contribution-list article > div:nth-child(3) small {
+    margin-top: 3px;
+    color: var(--quest-muted);
+    font-size: 10px;
+    font-weight: 800;
+}
+
+.quest-contribution-list article > div:nth-child(n + 4) {
+    text-align: right;
+}
+
+.quest-contribution-list article > div:nth-child(n + 4) span,
+.quest-contribution-list article > div:nth-child(n + 4) strong {
+    display: block;
+}
+
+.quest-contribution-list article > div:nth-child(n + 4) span {
+    color: var(--quest-muted);
+    font-size: 9px;
+    font-weight: 900;
+    text-transform: uppercase;
+}
+
+.quest-contribution-list article > div:nth-child(n + 4) strong {
+    margin-top: 2px;
+    font-size: 16px;
+}
+
+
+/* =========================================================
+   PARTY LIST
+   ========================================================= */
+
+.quest-battle-grid {
+    display: grid;
+    grid-template-columns: minmax(280px, 0.72fr) minmax(0, 1.28fr);
+    gap: 24px;
+}
+
+.quest-party-list {
+    display: grid;
+    gap: 11px;
+    margin-top: 22px;
+}
+
+.quest-party-list article {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+
+    padding: 13px;
+
+    border: 2px solid var(--quest-blue-border);
+    border-radius: 15px;
+
+    background: var(--quest-white);
+}
+
+.quest-party-list article.is-down {
+    opacity: 0.58;
+    filter: grayscale(0.6);
+}
+
+.quest-party-member__body {
+    min-width: 0;
+    flex: 1;
+}
+
+.quest-party-member__body > div:first-child {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+
+    margin-bottom: 8px;
+}
+
+.quest-party-member__body span,
+.quest-party-member__body small {
+    color: var(--quest-muted);
+    font-size: 10px;
+    font-weight: 800;
+}
+
+.quest-party-member__body small {
+    display: block;
+    margin-top: 5px;
+}
+
+
+/* =========================================================
+   TURN STATES
+   ========================================================= */
+
+.quest-turn-panel {
+    min-height: 470px;
+}
+
+.quest-turn-state {
+    display: grid;
+    min-height: 380px;
+
+    place-content: center;
+
+    text-align: center;
+}
+
+.quest-turn-state > span {
+    color: var(--quest-blue);
+    font-size: 55px;
+}
+
+
+/* =========================================================
+   DIFFICULTY
+   ========================================================= */
+
+.quest-question-picker > p:not(.quest-eyebrow) {
+    max-width: 600px;
+}
+
+.quest-difficulties {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+
+    margin-top: 24px;
+}
+
+.quest-difficulties button {
+    padding: 18px 10px;
+
+    border: 2px solid var(--quest-blue-border);
+    border-radius: 15px;
+
+    background: var(--quest-white);
+
+    cursor: pointer;
+    text-align: left;
+    text-transform: capitalize;
+}
+
+.quest-difficulties button.is-selected {
+    border-color: var(--quest-border);
+
+    background: var(--quest-blue-light);
+
+    box-shadow: 3px 3px 0 var(--quest-border);
+}
+
+.quest-difficulties strong,
+.quest-difficulties span,
+.quest-difficulties small {
+    display: block;
+}
+
+.quest-difficulties span {
+    margin-top: 8px;
+    font-size: 13px;
+    font-weight: 850;
+}
+
+.quest-difficulties small {
+    margin-top: 2px;
+    color: var(--quest-muted);
+}
+
+
+/* =========================================================
+   QUESTIONS
+   ========================================================= */
+
+.quest-question__meta span {
+    padding: 6px 10px;
+
+    border-radius: 999px;
+
+    background: var(--quest-blue-light);
+    color: var(--quest-blue-dark);
+
+    font-size: 11px;
+    font-weight: 950;
+    text-transform: capitalize;
+}
+
+.quest-question h2 {
+    margin-top: 25px;
+
+    font-size: clamp(25px, 4vw, 36px);
+    line-height: 1.22;
+}
+
+.quest-answers {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 11px;
+
+    margin-top: 25px;
+}
+
+.quest-answers button {
+    min-height: 65px;
+    padding: 13px;
+
+    border: 2px solid var(--quest-blue-border);
+    border-radius: 14px;
+
+    background: var(--quest-white);
+    color: inherit;
+
+    cursor: pointer;
+    font-weight: 850;
+    text-align: left;
+}
+
+.quest-answers button:hover,
+.quest-answers button.is-selected {
+    border-color: var(--quest-border);
+
+    background: var(--quest-blue-light);
+
+    box-shadow: 3px 3px 0 var(--quest-border);
+}
+
+
+/* =========================================================
+   ACTIONS
+   ========================================================= */
+
+.quest-action-cards {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 13px;
+
+    margin-top: 25px;
+}
+
+.quest-action-cards > button,
+.quest-heal-card {
+    min-height: 230px;
+    padding: 24px;
+
+    border: 2px solid var(--quest-border);
+    border-radius: 19px;
+
+    color: inherit;
+    text-align: center;
+}
+
+.quest-action-cards > button {
+    background: var(--quest-blue-light);
+    cursor: pointer;
+}
+
+.quest-heal-card {
+    background: var(--quest-white);
+}
+
+.quest-action-cards > button > span,
+.quest-heal-card > span {
+    display: block;
+    font-size: 45px;
+}
+
+.quest-action-cards strong,
+.quest-action-cards small {
+    display: block;
+}
+
+.quest-action-cards strong {
+    margin-top: 6px;
+    font-size: 25px;
+}
+
+.quest-action-cards small {
+    margin: 5px 0 15px;
+    color: var(--quest-muted);
+}
+
+.quest-heal-card button {
+    width: 100%;
+    min-height: 42px;
+    margin-top: 8px;
+
+    border: 2px solid var(--quest-border);
+    border-radius: 10px;
+
+    background: var(--quest-white);
+
+    cursor: pointer;
+    font-weight: 900;
+}
+
+
+/* =========================================================
+   REFRESH
+   ========================================================= */
+
+.quest-refresh {
+    display: grid;
+    width: 42px;
+    height: 42px;
+
+    place-items: center;
+
+    border: 2px solid var(--quest-border);
+    border-radius: 12px;
+
+    background: var(--quest-white);
+    box-shadow: 2px 2px 0 var(--quest-border);
+
+    cursor: pointer;
+    font-size: 20px;
+}
+
+
+/* =========================================================
+   RANKINGS
+   ========================================================= */
+
+.quest-ranking-list {
+    display: grid;
+    gap: 10px;
+    margin-top: 25px;
+}
+
+.quest-ranking-list article {
+    display: grid;
+    grid-template-columns: 55px minmax(170px, 0.8fr) minmax(150px, 1fr) 100px;
+    align-items: center;
+    gap: 15px;
+
+    padding: 15px;
+
+    border: 2px solid var(--quest-blue-border);
+    border-radius: 15px;
+
+    background: var(--quest-white);
+}
+
+.quest-ranking-list article.is-current {
+    border-color: var(--quest-border);
+    background: var(--quest-blue-light);
+}
+
+.quest-rank {
+    font-size: 20px;
+    text-align: center;
+}
+
+.quest-ranking-list article > div:nth-child(2) span {
+    display: block;
+
+    margin-top: 3px;
+
+    color: var(--quest-muted);
+
+    font-size: 11px;
+    font-weight: 750;
+}
+
+.quest-ranking-progress {
+    height: 10px;
+    overflow: hidden;
+
+    border-radius: 999px;
+
+    background: var(--quest-blue-soft);
+}
+
+.quest-ranking-progress span {
+    display: block;
+    height: 100%;
+
+    border-radius: inherit;
+
+    background: var(--quest-blue-dark);
+}
+
+.quest-ranking-list article > strong:last-child {
+    font-size: 12px;
+    text-align: right;
+}
+
+.quest-empty {
+    margin-top: 22px;
+    padding: 30px;
+
+    border: 2px dashed var(--quest-blue-border);
+    border-radius: 16px;
+
+    color: var(--quest-muted);
+
+    text-align: center;
+    font-weight: 800;
+}
+
+
+/* =========================================================
+   TABLET
+   ========================================================= */
+
+@media (max-width: 820px) {
+    .quest-create-panel,
+    .quest-battle-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .quest-roster {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .quest-ranking-list article {
+        grid-template-columns: 50px 1fr 90px;
+    }
+
+    .quest-ranking-progress {
+        grid-column: 2 / -1;
+    }
+
+    .quest-battle-hud {
+        grid-template-columns: minmax(170px, 0.7fr) minmax(260px, 1.3fr);
+        padding: 16px 18px 22px;
+    }
+
+    .quest-battle-hud h2 {
+        font-size: clamp(24px, 5vw, 36px);
+    }
+
+    .quest-enemy-side {
+        bottom: 6%;
+        left: 3%;
+        width: 28%;
+        height: 45%;
+    }
+
+    .quest-versus {
+        bottom: 25%;
+        left: 31%;
+    }
+
+    .quest-party-formation {
+        right: 2%;
+        bottom: 6%;
+        width: 63%;
+        gap: 7px;
+    }
+
+    .quest-combatant {
+        width: min(96px, 19%);
+    }
+
+    .quest-contribution-list article {
+        grid-template-columns:
+            42px 42px minmax(130px, 1fr)
+            80px 80px;
+    }
+}
+
+
+/* =========================================================
+   MOBILE
+   ========================================================= */
+
+@media (max-width: 620px) {
+    .trivia-quest-page {
+        padding: 14px;
+    }
+
+    .quest-brand {
+        font-size: 17px;
+    }
+
+    .quest-brand img {
+        height: 46px;
+    }
+
+    .quest-nav > .quest-button {
+        min-height: 40px;
+        padding: 0 12px;
+    }
+
+
+    /* Hero */
+
+    .quest-hero {
+        grid-template-columns: 1fr;
+
+        padding: 30px 23px;
+
+        text-align: center;
+    }
+
+    .quest-hero__art {
+        width: min(250px, 100%);
+        min-height: 170px;
+
+        justify-self: center;
+    }
+
+    .quest-hero__art > img {
+        max-height: 190px;
+    }
+
+    .quest-hero__seal {
+        width: 115px;
+        height: 115px;
+
+        justify-self: center;
+    }
+
+    .quest-hero__art .quest-hero__seal {
+        right: 0;
+        bottom: 0;
+
+        width: 92px;
+        height: 92px;
+    }
+
+    .quest-hero__art .quest-hero__seal span {
+        font-size: 36px;
+    }
+
+    .quest-hero__seal span {
+        font-size: 42px;
+    }
+
+
+    /* Lobby */
+
+    .quest-invite-panel {
+        grid-template-columns: 1fr;
+        text-align: center;
+    }
+
+    .quest-invite-mark {
+        margin: auto;
+    }
+
+    .quest-create-panel form > div,
+    .quest-share-box > div {
+        grid-template-columns: 1fr;
+    }
+
+    .quest-roster {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .quest-lobby-actions {
+        flex-direction: column;
+    }
+
+
+    /* Arena */
+
+    .quest-arena {
+        grid-template-columns: 1fr;
+        padding-bottom: 85px;
+        text-align: center;
+    }
+
+    .quest-boss {
+        width: min(230px, 75%);
+        grid-row: 1;
+    }
+
+
+    /* Questions */
+
+    .quest-difficulties {
+        grid-template-columns: 1fr;
+    }
+
+    .quest-difficulties button {
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .quest-difficulties span,
+    .quest-difficulties small {
+        margin: 0;
+    }
+
+    .quest-answers,
+    .quest-action-cards {
+        grid-template-columns: 1fr;
+    }
+
+
+    /* Rankings */
+
+    .quest-ranking-list article {
+        grid-template-columns: 42px 1fr;
+    }
+
+    .quest-ranking-list article > strong:last-child,
+    .quest-ranking-progress {
+        grid-column: 2;
+    }
+
+    .quest-ranking-list article > strong:last-child {
+        text-align: left;
+    }
+
+
+    /* Battlefield */
+
+    .quest-battle-stage {
+        min-height: 570px;
+        aspect-ratio: auto;
+
+        background-position: center;
+        background-size: cover;
+    }
+
+    .quest-battle-stage.has-battlefield-art {
+        background-position: center;
+        background-size: cover;
+    }
+
+    .quest-battle-hud {
+        grid-template-columns: 1fr;
+        gap: 8px;
+
+        padding: 14px;
+
+        text-align: left;
+    }
+
+    .quest-battle-hud .quest-eyebrow {
+        font-size: 9px;
+    }
+
+    .quest-battle-hud h2 {
+        font-size: 25px;
+    }
+
+    .quest-battle-hud .quest-boss-health {
+        padding: 7px 10px 9px;
+    }
+
+    .quest-enemy-side {
+        bottom: 7%;
+        left: 3%;
+
+        width: 35%;
+        height: 43%;
+    }
+
+    .quest-versus {
+        bottom: 25%;
+        left: 37%;
+
+        width: 34px;
+        height: 34px;
+
+        font-size: 9px;
+    }
+
+    .quest-party-formation {
+        right: 2%;
+        bottom: 6%;
+
+        display: grid;
+
+        width: 56%;
+
+        grid-template-columns: repeat(2, minmax(65px, 1fr));
+        gap: 8px;
+    }
+
+    .quest-combatant,
+    .quest-combatant:nth-child(2),
+    .quest-combatant:nth-child(4),
+    .quest-combatant:nth-child(5) {
+        width: 100%;
+    }
+
+    .quest-combatant .quest-avatar {
+        width: 52px;
+        height: 52px;
+    }
+
+    .quest-combatant > strong {
+        font-size: 9px;
+    }
+
+
+    /* Command panel */
+
+    .quest-command-panel {
+        padding: 65px 18px 22px;
+    }
+
+    .quest-command-panel__label {
+        align-items: flex-start;
+        flex-direction: column;
+        justify-content: center;
+        gap: 2px;
+
+        padding: 8px 16px;
+    }
+
+
+    /* Contributions */
+
+    .quest-contribution-panel .quest-section-heading {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .quest-contribution-total {
+        width: 100%;
+        text-align: left;
+    }
+
+    .quest-contribution-list article {
+        grid-template-columns: 34px 42px minmax(0, 1fr) auto;
+        gap: 9px;
+
+        padding: 11px;
+    }
+
+    .quest-contribution-list article > div:nth-child(4) {
+        text-align: right;
+    }
+
+    .quest-contribution-list article > div:nth-child(5) {
+        grid-column: 3 / -1;
+
+        display: flex;
+        justify-content: space-between;
+
+        padding-top: 7px;
+
+        border-top: 1px solid var(--quest-blue-border);
+
+        text-align: left;
+    }
+}
+
+
+/* =========================================================
+   COMPACT MOBILE BATTLE MODE
+   ========================================================= */
+
+@media (max-width: 620px) {
+    .trivia-quest-page.is-battle-active {
+        padding: 8px;
+    }
+
+    .is-battle-active .quest-shell {
+        width: 100%;
+    }
+
+    .is-battle-active .quest-hero {
+        display: none;
+    }
+
+    .is-battle-active .quest-nav {
+        min-height: 42px;
+        margin-bottom: 8px;
+    }
+
+    .is-battle-active .quest-brand img {
+        height: 36px;
+    }
+
+    .is-battle-active .quest-brand span {
+        font-size: 14px;
+    }
+
+    .is-battle-active .quest-nav > .quest-button {
+        min-height: 34px;
+        padding: 0 10px;
+        font-size: 11px;
+    }
+
+    .is-battle-active .quest-notice {
+        margin-top: 6px;
+        padding: 7px 10px;
+        font-size: 10px;
+    }
+
+
+    /* Battlefield */
+
+    .is-battle-active .quest-battle-stage {
+        width: 100%;
+        min-height: 0;
+        margin-top: 8px;
+
+        aspect-ratio: 16 / 9;
+
+        border-radius: 16px;
+
+        background-position: center;
+        background-size: 100% 100%;
+
+        box-shadow: 4px 4px 0 rgba(25, 25, 25, 0.12);
+    }
+
+    .is-battle-active .quest-battle-stage.has-battlefield-art {
+        background-position: center;
+        background-size: 100% 100%;
+    }
+
+    .is-battle-active .quest-battle-hud {
+        display: grid;
+        grid-template-columns: minmax(90px, 0.65fr) minmax(160px, 1.35fr);
+        align-items: start;
+        gap: 7px;
+
+        padding: 7px 9px 13px;
+
+        text-align: left;
+    }
+
+    .is-battle-active .quest-battle-hud .quest-eyebrow {
+        display: none;
+    }
+
+    .is-battle-active .quest-battle-hud h2 {
+        overflow: hidden;
+
+        font-size: 15px;
+        line-height: 1.1;
+
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .is-battle-active .quest-battle-hud .quest-boss-health {
+        padding: 4px 6px 5px;
+        border-radius: 7px;
+    }
+
+    .is-battle-active .quest-battle-hud .quest-health-label {
+        margin-bottom: 3px;
+        font-size: 8px;
+    }
+
+    .is-battle-active .quest-health-track--boss {
+        height: 8px;
+        border-width: 1px;
+    }
+
+
+    /* Characters */
+
+    .is-battle-active .quest-enemy-side {
+        bottom: 4%;
+        left: 3%;
+
+        width: 27%;
+        height: 52%;
+    }
+
+    .is-battle-active .quest-combat-label,
+    .is-battle-active .quest-versus {
+        display: none;
+    }
+
+    .is-battle-active .quest-party-formation {
+        right: 2%;
+        bottom: 3%;
+
+        display: flex;
+
+        width: 68%;
+
+        align-items: flex-end;
+        justify-content: flex-end;
+
+        gap: 3px;
+    }
+
+    .is-battle-active .quest-combatant,
+    .is-battle-active .quest-combatant:nth-child(2),
+    .is-battle-active .quest-combatant:nth-child(4),
+    .is-battle-active .quest-combatant:nth-child(5) {
+        width: 19%;
+    }
+
+    .is-battle-active .quest-combatant .quest-avatar {
+        width: clamp(28px, 9vw, 42px);
+        height: clamp(28px, 9vw, 42px);
+
+        margin-bottom: 2px;
+        border-width: 1px;
+    }
+
+    .is-battle-active .quest-combatant > strong {
+        padding: 1px 2px;
+        font-size: 6px;
+    }
+
+    .is-battle-active .quest-combatant .quest-health-track {
+        height: 4px;
+        margin: 2px 1px 0;
+        border: 0;
+    }
+
+    .is-battle-active .quest-combatant small {
+        margin-top: 1px;
+        padding: 1px 2px;
+        font-size: 5px;
+    }
+
+
+    /* Command panel */
+
+    .is-battle-active .quest-command-panel {
+        height: clamp(290px, 43dvh, 370px);
+        min-height: 0;
+
+        margin-top: 8px;
+        padding: 43px 13px 12px;
+
+        overflow-x: hidden;
+        overflow-y: auto;
+
+        border-radius: 16px;
+
+        box-shadow: 4px 4px 0 rgba(25, 25, 25, 0.1);
+
+        scrollbar-width: thin;
+        scrollbar-color: var(--quest-blue-dark) transparent;
+    }
+
+    .is-battle-active .quest-command-panel__label {
+        min-height: 35px;
+        padding: 5px 11px;
+
+        border-radius: 14px 14px 0 0;
+    }
+
+    .is-battle-active .quest-command-panel__label span,
+    .is-battle-active .quest-command-panel__label small {
+        font-size: 8px;
+    }
+
+
+    /* Questions */
+
+    .is-battle-active .quest-question-picker h2,
+    .is-battle-active .quest-question h2,
+    .is-battle-active .quest-actions h2 {
+        font-size: 20px;
+    }
+
+    .is-battle-active .quest-question-picker > p:not(.quest-eyebrow) {
+        margin: 5px 0;
+        font-size: 11px;
+    }
+
+    .is-battle-active .quest-eyebrow {
+        margin-bottom: 3px;
+        font-size: 8px;
+    }
+
+    .is-battle-active .quest-difficulties {
+        grid-template-columns: repeat(3, 1fr);
+        gap: 5px;
+
+        margin-top: 10px;
+    }
+
+    .is-battle-active .quest-difficulties button {
+        display: block;
+
+        padding: 8px 6px;
+
+        border-radius: 9px;
+    }
+
+    .is-battle-active .quest-difficulties strong {
+        font-size: 10px;
+    }
+
+    .is-battle-active .quest-difficulties span {
+        margin-top: 3px;
+        font-size: 8px;
+    }
+
+    .is-battle-active .quest-difficulties small {
+        margin-top: 1px;
+        font-size: 7px;
+    }
+
+    .is-battle-active .quest-button--wide {
+        min-height: 38px;
+        margin-top: 10px;
+        font-size: 11px;
+    }
+
+    .is-battle-active .quest-question__meta span {
+        padding: 4px 7px;
+        font-size: 8px;
+    }
+
+    .is-battle-active .quest-question h2 {
+        margin-top: 10px;
+    }
+
+    .is-battle-active .quest-answers {
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+
+        margin-top: 12px;
+    }
+
+    .is-battle-active .quest-answers button {
+        min-height: 42px;
+        padding: 7px;
+
+        border-radius: 9px;
+
+        font-size: 10px;
+    }
+
+
+    /* Actions */
+
+    .is-battle-active .quest-action-cards {
+        grid-template-columns: 1fr 1fr;
+        gap: 7px;
+
+        margin-top: 10px;
+    }
+
+    .is-battle-active .quest-action-cards > button,
+    .is-battle-active .quest-heal-card {
+        min-height: 190px;
+        padding: 12px 8px;
+
+        border-radius: 12px;
+    }
+
+    .is-battle-active .quest-action-cards > button > span,
+    .is-battle-active .quest-heal-card > span {
+        font-size: 28px;
+    }
+
+    .is-battle-active .quest-action-cards strong {
+        font-size: 17px;
+    }
+
+    .is-battle-active .quest-action-cards small {
+        margin: 3px 0 8px;
+        font-size: 8px;
+    }
+
+    .is-battle-active .quest-heal-card select {
+        min-height: 34px;
+        padding: 0 6px;
+
+        font-size: 9px;
+    }
+
+    .is-battle-active .quest-heal-card button {
+        min-height: 32px;
+        font-size: 9px;
+    }
+
+    .is-battle-active .quest-turn-state {
+        min-height: 220px;
+    }
+
+    .is-battle-active .quest-turn-state > span {
+        font-size: 34px;
+    }
+}

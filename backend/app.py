@@ -1,4 +1,3 @@
-
 import os
 
 from flask import Flask
@@ -13,7 +12,7 @@ def create_app(config_object=Config):
     init_extensions(app)
 
     # Firebase must be initialized before importing route modules because the
-    # migrated route functions share the initialized Firestore references.
+    # route functions share the initialized Firestore references.
     with app.app_context():
         from services.firebase import initialize_firebase
 
@@ -27,6 +26,7 @@ def create_app(config_object=Config):
     from routes.riddles import bp as riddles_bp
     from routes.task_boards import bp as task_boards_bp
     from routes.telegram import bp as telegram_bp
+    from routes.trivia_quest import bp as trivia_quest_bp
     from routes.users import bp as users_bp
     from routes.wordle import bp as wordle_bp
 
@@ -41,6 +41,7 @@ def create_app(config_object=Config):
         task_boards_bp,
         telegram_bp,
         wordle_bp,
+        trivia_quest_bp,
         frontend_bp,
     ):
         app.register_blueprint(blueprint)

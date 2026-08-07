@@ -10,7 +10,7 @@ import CalendarPage from "../pages/calendar/calendar.jsx";
 import TaskBoardPage from "../pages/taskboard/taskboard.jsx";
 import NewsCenter from "../pages/newscenter/newscenter.jsx";
 import RiddlesPage from "../pages/riddles/riddlespage.jsx";
-
+import TriviaQuest from "../pages/triviaquest/triviaquest.jsx";
 
 function AppRoutes() {
     return (
@@ -45,7 +45,23 @@ function AppRoutes() {
                     </ProtectedRoute>
                 }
             />
-            <Route path="/riddles" element={<RiddlesPage />} />
+            <Route
+                path="/trivia-quest/join"
+                element={
+                    <ProtectedRoute>
+                        <TriviaQuest />
+                    </ProtectedRoute>
+                }
+            />
+                        <Route
+                path="/riddles"
+                element={
+                    <ProtectedRoute>
+                        <RiddlesPage />
+                    </ProtectedRoute>
+                }
+            />            
+
             <Route path="/reset-password" element={<ResetPasswordPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

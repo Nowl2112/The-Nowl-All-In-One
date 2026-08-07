@@ -8,6 +8,7 @@ import calendarToolIcon from "../../assets/seckotaro.png";
 import newsToolIcon from "../../assets/news-tool-icon.png";
 import taskBoardsToolIcon from "../../assets/taskboard-tool-icon.png";
 import haruDetective from "../../assets/haru-detective.png";
+import triviaMomo from "../../assets/trivia-momo.png";
 import "./homepage.css";
 
 const API_BASE_URL =
@@ -282,6 +283,9 @@ function HomePage() {
     const [dailyRiddle, setDailyRiddle] = useState(null);
     const [dailyRiddleStatus, setDailyRiddleStatus] = useState("idle");
     const [dailyRiddleError, setDailyRiddleError] = useState("");
+    const [triviaQuestTeam, setTriviaQuestTeam] = useState(null);
+    const [triviaQuestBattle, setTriviaQuestBattle] = useState(null);
+    const [triviaQuestStatus, setTriviaQuestStatus] = useState("idle");
 
     const [upcomingItems, setUpcomingItems] = useState([]);
     const [upcomingStatus, setUpcomingStatus] = useState("idle");
@@ -538,6 +542,46 @@ function HomePage() {
         [currentUser, getAuthHeaders],
     );
 
+    const loadTriviaQuest = useCallback(
+        async (signal) => {
+            if (!currentUser) {
+                setTriviaQuestTeam(null);
+                setTriviaQuestBattle(null);
+                setTriviaQuestStatus("idle");
+                return;
+            }
+
+            setTriviaQuestStatus("loading");
+            try {
+                const headers = await getAuthHeaders();
+                const [teamResponse, battleResponse] = await Promise.all([
+                    fetch(`${API_BASE_URL}/api/games/trivia-quest/teams/me`, {
+                        headers, signal, cache: "no-store",
+                    }),
+                    fetch(`${API_BASE_URL}/api/games/trivia-quest/battle`, {
+                        headers, signal, cache: "no-store",
+                    }),
+                ]);
+                const [teamData, battleData] = await Promise.all([
+                    readJsonResponse(teamResponse),
+                    readJsonResponse(battleResponse),
+                ]);
+                if (!teamResponse.ok || !battleResponse.ok) {
+                    throw new Error(teamData.error || battleData.error || "Could not load Trivia Quest.");
+                }
+                setTriviaQuestTeam(teamData.team || null);
+                setTriviaQuestBattle(battleData.battle || null);
+                setTriviaQuestStatus("success");
+            } catch (error) {
+                if (error?.name === "AbortError") return;
+                setTriviaQuestTeam(null);
+                setTriviaQuestBattle(null);
+                setTriviaQuestStatus("error");
+            }
+        },
+        [currentUser, getAuthHeaders],
+    );
+
 
     const loadUpcomingItems = useCallback(
         async (signal) => {
@@ -742,6 +786,7 @@ function HomePage() {
             loadHeadlines(),
             loadTaskBoards(),
             loadDailyRiddle(),
+            loadTriviaQuest(),
             loadPreviousPodium(),
         ]);
     }, [
@@ -751,6 +796,7 @@ function HomePage() {
         loadHeadlines,
         loadTaskBoards,
         loadDailyRiddle,
+        loadTriviaQuest,
         loadPreviousPodium,
     ]);
 
@@ -762,6 +808,8 @@ function HomePage() {
             setHeadlines([]);
             setTaskBoards([]);
             setDailyRiddle(null);
+            setTriviaQuestTeam(null);
+            setTriviaQuestBattle(null);
             setPreviousPodium(null);
             return undefined;
         }
@@ -775,6 +823,7 @@ function HomePage() {
             loadHeadlines(controller.signal),
             loadTaskBoards(controller.signal),
             loadDailyRiddle(controller.signal),
+            loadTriviaQuest(controller.signal),
             loadPreviousPodium(controller.signal),
         ]);
 
@@ -787,6 +836,7 @@ function HomePage() {
         loadHeadlines,
         loadTaskBoards,
         loadDailyRiddle,
+        loadTriviaQuest,
         loadPreviousPodium,
     ]);
 
@@ -1467,6 +1517,44 @@ function HomePage() {
                             <span aria-hidden="true">→</span>
                         </button>
                     </aside>
+                </section>
+
+                <section className="trivia-quest-promo">
+                        <img
+                            src={triviaQuestBattle?.boss?.imageUrl || triviaMomo}
+                            alt={triviaQuestBattle?.boss?.name || "Kotaro ready for Trivia Quest"}
+                            onError={(event) => {
+                                if (event.currentTarget.src !== kotaroImage) {
+                                    event.currentTarget.src = kotaroImage;
+                                }
+                            }}
+                        />
+                    <div>
+                        <p className="home-section-label">Weekly team adventure</p>
+                        <h2>Trivia Quest</h2>
+                        {triviaQuestStatus === "loading" ? (
+                            <p>Checking this week&apos;s quest...</p>
+                        ) : triviaQuestBattle ? (
+                            <div className="trivia-quest-promo__boss-status">
+                                <strong>{triviaQuestBattle.boss?.name || "Weekly boss"}</strong>
+                                <span>{Number(triviaQuestBattle.boss?.health || 0).toLocaleString()} / {Number(triviaQuestBattle.boss?.maxHealth || 0).toLocaleString()} HP</span>
+                                <div className="trivia-quest-promo__health" aria-label="Boss health">
+                                    <span style={{ width: `${Math.max(0, Math.min(100, (Number(triviaQuestBattle.boss?.health || 0) / Math.max(1, Number(triviaQuestBattle.boss?.maxHealth || 0))) * 100))}%` }} />
+                                </div>
+                            </div>
+                        ) : triviaQuestTeam ? (
+                            <p>Your party, {triviaQuestTeam.name}, is forming. Start the battle to reveal this week&apos;s boss.</p>
+                        ) : (
+                            <p>Form a party of up to five and meet this week&apos;s boss.</p>
+                        )}
+                    </div>
+                    <button
+                        type="button"
+                        className="button button--primary"
+                        onClick={() => navigate("/trivia-quest/join")}
+                    >
+                        Enter your quest <span aria-hidden="true">→</span>
+                    </button>
                 </section>
 
                 <section
