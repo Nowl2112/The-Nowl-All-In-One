@@ -28,6 +28,7 @@ from services.trivia_quest_service import (
     answer_matches_digest,
     amounts_for,
     boss_max_health,
+    boss_health_after_team_join,
     correct_answer_from_question,
     new_invite_token,
     normalize_difficulty,
@@ -382,8 +383,13 @@ def create_invite(team_id: str):
         return jsonify({"error": "Team not found"}), 404
     if team.get("leaderId") != identity["uid"]:
         return jsonify({"error": "Only the team leader can create an invite"}), 403
-    if team.get("status") != "forming":
-        return jsonify({"error": "Invites close after the battle starts"}), 409
+    if team.get("status") not in {"forming", "active"}:
+        return jsonify({"error": "This team is no longer accepting members"}), 409
+    if team.get("status") == "active":
+        battle_id = team.get("battleId") or _battle_id(team_id, week_key())
+        battle = _snapshot_dict(_doc(BATTLES, battle_id).get())
+        if not battle or battle.get("status") != "active":
+            return jsonify({"error": "This battle is already complete"}), 409
     if len(team.get("memberIds", [])) >= MAX_TEAM_SIZE:
         return jsonify({"error": "The team is full"}), 409
 
@@ -487,8 +493,14 @@ def preview_invite(raw_token: str):
     if invite.get("weekKey") != week_key() or (_parse_time(invite.get("expiresAt")) or datetime.min.replace(tzinfo=SINGAPORE_TZ)) <= datetime.now(SINGAPORE_TZ):
         return jsonify({"error": "This invite has expired"}), 410
     team = _snapshot_dict(_doc(TEAMS, invite["teamId"]).get())
-    if not team or team.get("status") != "forming":
+    if not team or team.get("status") not in {"forming", "active"}:
         return jsonify({"error": "This team is no longer accepting members"}), 409
+    if team.get("status") == "active":
+        battle_id = team.get("battleId") or _battle_id(
+            invite["teamId"], week_key())
+        battle = _snapshot_dict(_doc(BATTLES, battle_id).get())
+        if not battle or battle.get("status") != "active":
+            return jsonify({"error": "This battle is already complete"}), 409
     return jsonify({"team": _team_response(invite["teamId"], team), "expiresAt": invite["expiresAt"]})
 
 
@@ -523,11 +535,20 @@ def accept_invite(raw_token: str):
             raise ValueError("You already belong to another team this week")
         team_ref = _doc(TEAMS, invite["teamId"])
         team = _snapshot_dict(team_ref.get(transaction=transaction))
-        if not team or team.get("status") != "forming":
+        if not team or team.get("status") not in {"forming", "active"}:
             raise ValueError("This team is no longer accepting members")
         members = list(team.get("memberIds", []))
         if len(members) >= MAX_TEAM_SIZE:
             raise ValueError("The team is full")
+        battle_ref = None
+        battle = None
+        if team.get("status") == "active":
+            battle_id = team.get("battleId") or _battle_id(
+                invite["teamId"], current_week)
+            battle_ref = _doc(BATTLES, battle_id)
+            battle = _snapshot_dict(battle_ref.get(transaction=transaction))
+            if not battle or battle.get("status") != "active":
+                raise ValueError("This battle is already complete")
         members.append(identity["uid"])
         now = _now_iso()
         transaction.update(team_ref, {"memberIds": members, "updatedAt": now})
@@ -537,6 +558,27 @@ def accept_invite(raw_token: str):
         })
         transaction.update(
             invite_ref, {"useCount": int(invite.get("useCount", 0)) + 1})
+        if battle_ref is not None and battle is not None:
+            new_health, new_maximum = boss_health_after_team_join(
+                battle.get("bossHealth", 0),
+                battle.get("bossMaxHealth", 0),
+                len(members),
+            )
+            states = dict(battle.get("memberStates", {}))
+            states[identity["uid"]] = {
+                "health": PLAYER_MAX_HEALTH,
+                "maxHealth": PLAYER_MAX_HEALTH,
+                "questionsAnswered": 0,
+                "correctAnswers": 0,
+                "damageDealt": 0,
+                "healingDone": 0,
+            }
+            transaction.update(battle_ref, {
+                "bossHealth": new_health,
+                "bossMaxHealth": new_maximum,
+                "memberStates": states,
+                "updatedAt": now,
+            })
         return invite["teamId"]
 
     try:

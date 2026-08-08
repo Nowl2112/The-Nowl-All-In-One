@@ -174,10 +174,10 @@ function TriviaQuest() {
     useEffect(() => {
         if (battle?.status !== "active" || turn) return undefined;
         const timer = window.setInterval(() => {
-            void loadBattle().catch(() => undefined);
+            void Promise.all([loadBattle(), loadTeam()]).catch(() => undefined);
         }, 10000);
         return () => window.clearInterval(timer);
-    }, [battle?.status, loadBattle, turn]);
+    }, [battle?.status, loadBattle, loadTeam, turn]);
 
     const isLeader = team?.leaderId === currentUser?.uid;
     const currentPlayer = battle?.members?.find((member) => member.uid === currentUser?.uid);
@@ -223,6 +223,10 @@ function TriviaQuest() {
             setInvitePreview(null);
             setSearchParams({}, { replace: true });
             setMessage(`You joined ${data.team.name}.`);
+            if (data.team.status === "active") {
+                await loadBattle();
+                await loadActiveTurn();
+            }
             await loadLeaderboard();
         });
     }
@@ -638,6 +642,29 @@ async function copyInvite() {
                             </div>
                         )}
                 </section>
+
+                {isLeader && battle.status === "active" && (battle.members?.length || 0) < team?.maxMembers && (
+                    <section className="quest-panel quest-battle-invite">
+                        <div>
+                            <p className="quest-eyebrow">Party reinforcements</p>
+                            <h2>Invite another adventurer</h2>
+                            <p>The boss gains more maximum and remaining HP when a new player joins.</p>
+                        </div>
+                        <button type="button" className="quest-button" onClick={createInvite} disabled={Boolean(busy)}>
+                            {busy === "create-invite" ? "Creating link..." : "Create battle invite"}
+                        </button>
+                        {inviteDetails && (
+                            <div className="quest-share-box">
+                                <label htmlFor="quest-active-invite-url">Share this invite</label>
+                                <div>
+                                    <input id="quest-active-invite-url" readOnly value={inviteDetails.inviteUrl} onFocus={(event) => event.target.select()} />
+                                    <button type="button" onClick={copyInvite}>Copy</button>
+                                    <a href={inviteDetails.telegramShareUrl} target="_blank" rel="noreferrer">Telegram</a>
+                                </div>
+                            </div>
+                        )}
+                    </section>
+                )}
 
                 <section className="quest-panel quest-contribution-panel">
                     <div className="quest-section-heading">

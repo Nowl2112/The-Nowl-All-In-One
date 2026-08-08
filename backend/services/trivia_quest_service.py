@@ -55,6 +55,17 @@ def boss_max_health(team_size: int) -> int:
     return size * TARGET_SUCCESSFUL_ATTACKS_PER_PLAYER * EXPECTED_ATTACK_DAMAGE
 
 
+def boss_health_after_team_join(
+    current_health: int,
+    current_maximum: int,
+    new_team_size: int,
+) -> tuple[int, int]:
+    """Scale the boss for a join while preserving damage already dealt."""
+    new_maximum = boss_max_health(new_team_size)
+    added_health = max(0, new_maximum - int(current_maximum))
+    return max(0, int(current_health)) + added_health, new_maximum
+
+
 def normalize_difficulty(value: Any) -> str:
     difficulty = str(value or "medium").strip().lower()
     if difficulty not in DIFFICULTY_RULES:

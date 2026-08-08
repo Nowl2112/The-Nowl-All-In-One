@@ -1430,6 +1430,34 @@ select {
     max-width: 600px;
 }
 
+.quest-battle-invite {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 20px;
+    padding: 24px;
+}
+
+.quest-battle-invite h2,
+.quest-battle-invite p {
+    margin: 0;
+}
+
+.quest-battle-invite .quest-share-box {
+    grid-column: 1 / -1;
+    margin-top: 0;
+}
+
+@media (max-width: 640px) {
+    .quest-battle-invite {
+        grid-template-columns: 1fr;
+    }
+
+    .quest-battle-invite > .quest-button {
+        width: 100%;
+    }
+}
+
 .quest-answer-feedback {
     display: grid;
     gap: 4px;
