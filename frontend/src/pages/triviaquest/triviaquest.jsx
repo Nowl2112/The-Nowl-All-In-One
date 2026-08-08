@@ -181,7 +181,7 @@ function TriviaQuest() {
 
     const isLeader = team?.leaderId === currentUser?.uid;
     const currentPlayer = battle?.members?.find((member) => member.uid === currentUser?.uid);
-    const livingTeammates = useMemo(
+    const healTargets = useMemo(
         () => (battle?.members || []).filter((member) => member.health < member.maxHealth),
         [battle?.members],
     );
@@ -235,6 +235,21 @@ function TriviaQuest() {
             );
             setInviteDetails(data);
             setMessage("Invite created. Share it before the weekly reset.");
+        });
+    }
+
+    function removeMember(member) {
+        if (!member?.uid || member.uid === currentUser?.uid) return;
+        if (!window.confirm(`Remove ${member.displayName} from this team?`)) return;
+
+        void runAction(`remove-member-${member.uid}`, async () => {
+            const data = await apiRequest(
+                `/api/games/trivia-quest/teams/${encodeURIComponent(team.id)}/members/${encodeURIComponent(member.uid)}`,
+                { method: "DELETE" },
+            );
+            setTeam(data.team);
+            setInviteDetails(null);
+            setMessage(`${member.displayName} was removed from the team.`);
         });
     }
 
@@ -318,7 +333,6 @@ async function copyInvite() {
             );
             setAnswerResult(data);
             if (!data.correct) {
-                setMessage(`Not quite. You took ${data.damageTaken} damage.`);
                 setTurn(null);
                 setSelectedAnswer("");
                 await loadBattle();
@@ -426,6 +440,17 @@ async function copyInvite() {
                                 <strong>{member.displayName}</strong>
                                 <span>{member.uid === team.leaderId ? "Party leader" : "Adventurer"}</span>
                             </div>
+                            {isLeader && member.uid !== team.leaderId && (
+                                <button
+                                    type="button"
+                                    className="quest-roster__remove"
+                                    onClick={() => removeMember(member)}
+                                    disabled={Boolean(busy)}
+                                    aria-label={`Remove ${member.displayName} from the team`}
+                                >
+                                    {busy === `remove-member-${member.uid}` ? "Removing..." : "Remove"}
+                                </button>
+                            )}
                         </article>
                     ))}
                     {Array.from({ length: Math.max(0, team.maxMembers - team.memberCount) }, (_, index) => (
@@ -551,17 +576,24 @@ async function copyInvite() {
                             <div className="quest-turn-state"><span>♡</span><h2>You are down</h2><p>A teammate must heal you before you can answer another question.</p></div>
                         ) : !turn ? (
                             <div className="quest-question-picker">
+                                {answerResult && !answerResult.correct && (
+                                    <div className="quest-answer-feedback" role="status">
+                                        <span>Incorrect answer</span>
+                                        <strong>The correct answer was {answerResult.correctAnswer}.</strong>
+                                        <small>You took {answerResult.damageTaken} damage.</small>
+                                    </div>
+                                )}
                                 <p className="quest-eyebrow">Your next move</p>
                                 <h2>Choose a challenge</h2>
                                 <p>Harder questions deal more damage, but wrong answers hurt more too.</p>
                                 <div className="quest-difficulties">
                                     {[
-                                        ["easy", "25", "5"],
-                                        ["medium", "40", "10"],
-                                        ["hard", "55", "18"],
-                                    ].map(([level, damage, penalty]) => (
+                                        ["easy", "30", "15", "8"],
+                                        ["medium", "50", "25", "16"],
+                                        ["hard", "80", "40", "30"],
+                                    ].map(([level, damage, healing, penalty]) => (
                                         <button type="button" key={level} className={difficulty === level ? "is-selected" : ""} onClick={() => setDifficulty(level)}>
-                                            <strong>{level}</strong><span>{damage} attack</span><small>{penalty} risk</small>
+                                            <strong>{level}</strong><span>{damage} attack · {healing} heal</span><small>{penalty} damage if wrong</small>
                                         </button>
                                     ))}
                                 </div>
@@ -593,10 +625,14 @@ async function copyInvite() {
                                     <div className="quest-heal-card">
                                         <span>♡</span><strong>Heal</strong><small>Restore {answerResult.actions?.heal} HP</small>
                                         <select value={healTarget} onChange={(event) => setHealTarget(event.target.value)}>
-                                            <option value="">Choose teammate</option>
-                                            {livingTeammates.map((member) => <option value={member.uid} key={member.uid}>{member.displayName} · {member.health}/{member.maxHealth}</option>)}
+                                            <option value="">Choose who to heal</option>
+                                            {healTargets.map((member) => (
+                                                <option value={member.uid} key={member.uid}>
+                                                    {member.uid === currentUser?.uid ? "Yourself" : member.displayName} · {member.health}/{member.maxHealth}
+                                                </option>
+                                            ))}
                                         </select>
-                                        <button type="button" onClick={() => chooseAction("heal")} disabled={!healTarget || Boolean(busy)}>Heal teammate</button>
+                                        <button type="button" onClick={() => chooseAction("heal")} disabled={!healTarget || Boolean(busy)}>Use heal</button>
                                     </div>
                                 </div>
                             </div>

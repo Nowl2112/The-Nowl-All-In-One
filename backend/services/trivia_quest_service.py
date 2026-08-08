@@ -12,14 +12,24 @@ from zoneinfo import ZoneInfo
 SINGAPORE_TZ = ZoneInfo("Asia/Singapore")
 MAX_TEAM_SIZE = 5
 PLAYER_MAX_HEALTH = 100
-BASE_BOSS_HEALTH = 1400
-BOSS_HEALTH_PER_EXTRA_PLAYER = 1400
+# Weekly health is based on the normal (medium) attack cadence. Keeping the
+# target in successful attacks per player makes future damage rebalancing easy
+# to reason about and keeps similarly active teams fair at every party size.
+TARGET_SUCCESSFUL_ATTACKS_PER_PLAYER = 240
+EXPECTED_ATTACK_DAMAGE = 50
 INVITE_TOKEN_BYTES = 32
+MAX_QUESTION_FETCH_ATTEMPTS = 12
+
+EXCLUDED_QUESTION_CATEGORIES = {
+    "music",
+    "film and tv",
+    "film tv",
+}
 
 DIFFICULTY_RULES = {
-    "easy": {"damage": 25, "healing": 8, "penalty": 5},
-    "medium": {"damage": 40, "healing": 15, "penalty": 10},
-    "hard": {"damage": 55, "healing": 25, "penalty": 18},
+    "easy": {"damage": 30, "healing": 15, "penalty": 8},
+    "medium": {"damage": 50, "healing": 25, "penalty": 16},
+    "hard": {"damage": 80, "healing": 40, "penalty": 30},
 }
 
 
@@ -42,7 +52,7 @@ def week_key(value: datetime | None = None) -> str:
 
 def boss_max_health(team_size: int) -> int:
     size = max(1, min(int(team_size), MAX_TEAM_SIZE))
-    return BASE_BOSS_HEALTH + BOSS_HEALTH_PER_EXTRA_PLAYER * (size - 1)
+    return size * TARGET_SUCCESSFUL_ATTACKS_PER_PLAYER * EXPECTED_ATTACK_DAMAGE
 
 
 def normalize_difficulty(value: Any) -> str:
@@ -84,6 +94,26 @@ def answer_digest(answer: Any, salt: str) -> str:
 
 def answer_matches_digest(submitted: Any, salt: str, digest: str) -> bool:
     return hmac.compare_digest(answer_digest(submitted, salt), str(digest or ""))
+
+
+def correct_answer_from_question(question: dict[str, Any]) -> str:
+    """Recover the correct displayed choice without storing a plaintext answer."""
+    for choice in question.get("answers", []):
+        if answer_matches_digest(
+            choice,
+            question.get("answerSalt", ""),
+            question.get("correctAnswerDigest", ""),
+        ):
+            return str(choice)
+    return ""
+
+
+def question_category_allowed(category: Any) -> bool:
+    normalized = " ".join(
+        str(category or "").replace("_", " ").replace(
+            "&", " and ").casefold().split()
+    )
+    return normalized not in EXCLUDED_QUESTION_CATEGORIES
 
 
 def public_question(question: dict[str, Any]) -> dict[str, Any]:
@@ -137,8 +167,18 @@ class TriviaClient:
             else str(category_value or "")
         )
 
+        # Some providers omit IDs. A text-derived fallback remains stable so
+        # the weekly repeat guard still works instead of treating every fetch
+        # of the same question as new.
+        question_id = str(item.get("id") or "").strip()
+        if not question_id:
+            normalized_text = " ".join(str(text).casefold().split())
+            question_id = "text-" + hashlib.sha256(
+                normalized_text.encode("utf-8")
+            ).hexdigest()
+
         return {
-            "id": str(item.get("id") or secrets.token_hex(12)),
+            "id": question_id,
             "text": str(text),
             "difficulty": normalize_difficulty(item.get("difficulty") or normalized),
             "category": category,

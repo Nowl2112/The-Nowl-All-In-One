@@ -1430,6 +1430,33 @@ select {
     max-width: 600px;
 }
 
+.quest-answer-feedback {
+    display: grid;
+    gap: 4px;
+    margin-bottom: 22px;
+    padding: 16px 18px;
+    border: 2px solid var(--quest-red);
+    border-radius: 14px;
+    background: #fff1f0;
+}
+
+.quest-answer-feedback span {
+    color: var(--quest-red);
+    font-size: 10px;
+    font-weight: 950;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+}
+
+.quest-answer-feedback strong {
+    font-size: 18px;
+}
+
+.quest-answer-feedback small {
+    color: var(--quest-muted);
+    font-weight: 800;
+}
+
 .quest-difficulties {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
@@ -2383,4 +2410,26 @@ select {
     .is-battle-active .quest-turn-state > span {
         font-size: 34px;
     }
+}
+
+.quest-roster__remove {
+    margin-left: auto;
+    padding: 7px 10px;
+    border: 1px solid var(--quest-red);
+    border-radius: 8px;
+    background: var(--quest-white);
+    color: var(--quest-red);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.quest-roster__remove:hover:not(:disabled) {
+    background: #fff1f0;
+}
+
+.quest-roster__remove:disabled {
+    cursor: wait;
+    opacity: .55;
 }

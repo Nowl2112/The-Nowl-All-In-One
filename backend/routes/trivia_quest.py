@@ -21,15 +21,18 @@ from core import (
 )
 from services.trivia_quest_service import (
     MAX_TEAM_SIZE,
+    MAX_QUESTION_FETCH_ATTEMPTS,
     PLAYER_MAX_HEALTH,
     TriviaClient,
     answer_digest,
     answer_matches_digest,
     amounts_for,
     boss_max_health,
+    correct_answer_from_question,
     new_invite_token,
     normalize_difficulty,
     public_question,
+    question_category_allowed,
     token_hash,
     weekly_asset_index,
     week_bounds,
@@ -49,6 +52,7 @@ MEMBERSHIPS = "triviaQuestMemberships"
 INVITES = "triviaQuestInvites"
 BATTLES = "triviaQuestBattles"
 TURNS = "triviaQuestTurns"
+QUESTION_HISTORY = "triviaQuestQuestionHistory"
 SEASONS = "triviaQuestSeasons"
 BOSS_ASSETS = "triviaQuestBosses"
 AVATAR_ASSETS = "triviaQuestAvatars"
@@ -412,6 +416,66 @@ def create_invite(team_id: str):
     }), 201
 
 
+@bp.delete("/api/games/trivia-quest/teams/<team_id>/members/<member_uid>")
+def remove_team_member(team_id: str, member_uid: str):
+    firestore_error = _require_firestore()
+    if firestore_error:
+        return firestore_error
+    identity, _, error = _identity_and_user()
+    if error:
+        return error
+
+    current_week = week_key()
+    transaction = FIRESTORE_DB.transaction()
+
+    @firestore.transactional
+    def run(transaction):
+        team_ref = _doc(TEAMS, team_id)
+        team = _snapshot_dict(team_ref.get(transaction=transaction))
+        if not team or team.get("weekKey") != current_week:
+            raise LookupError("Team not found")
+        if team.get("leaderId") != identity["uid"]:
+            raise PermissionError("Only the team leader can remove members")
+        if team.get("status") != "forming":
+            raise ValueError("Members can only be removed during team setup")
+        if member_uid == identity["uid"]:
+            raise ValueError("The team leader cannot remove themselves")
+
+        members = list(team.get("memberIds", []))
+        if member_uid not in members:
+            raise LookupError("Team member not found")
+
+        membership_ref = _doc(
+            MEMBERSHIPS, _membership_id(current_week, member_uid))
+        membership = _snapshot_dict(
+            membership_ref.get(transaction=transaction))
+        if not membership or membership.get("teamId") != team_id:
+            raise ValueError("The member's team record is inconsistent")
+
+        members.remove(member_uid)
+        updated_team = {
+            **team,
+            "memberIds": members,
+            "updatedAt": _now_iso(),
+        }
+        transaction.update(team_ref, {
+            "memberIds": members,
+            "updatedAt": updated_team["updatedAt"],
+        })
+        transaction.delete(membership_ref)
+        return updated_team
+
+    try:
+        team = run(transaction)
+    except LookupError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except PermissionError as exc:
+        return jsonify({"error": str(exc)}), 403
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 409
+    return jsonify({"team": _team_response(team_id, team)})
+
+
 @bp.get("/api/games/trivia-quest/invites/<raw_token>")
 def preview_invite(raw_token: str):
     firestore_error = _require_firestore()
@@ -586,11 +650,31 @@ def issue_question():
         return jsonify({"error": "There is no active battle"}), 409
     if int(state.get("health", 0)) <= 0:
         return jsonify({"error": "You must be healed before answering another question"}), 409
+    current_week = week_key()
+    history_ref = _doc(QUESTION_HISTORY, identity["uid"])
+    history = _snapshot_dict(history_ref.get()) or {}
+    seen_question_ids = set(
+        history.get("questionIds", [])
+        if history.get("weekKey") == current_week
+        else []
+    )
+    question = None
     try:
-        question = _trivia_client().get_question(difficulty)
+        client = _trivia_client()
+        for _ in range(MAX_QUESTION_FETCH_ATTEMPTS):
+            candidate = client.get_question(difficulty)
+            if not question_category_allowed(candidate.get("category")):
+                continue
+            if candidate["id"] not in seen_question_ids:
+                question = candidate
+                break
     except (requests.RequestException, ValueError) as exc:
         current_app.logger.warning("Trivia question request failed: %s", exc)
         return jsonify({"error": "The trivia service is temporarily unavailable"}), 503
+    if question is None:
+        return jsonify({
+            "error": "No new questions are available at this difficulty right now. Try another difficulty."
+        }), 409
     turn_id = secrets.token_urlsafe(18)
     now = _now_iso()
     correct_answer = question.pop("correctAnswer")
@@ -600,7 +684,7 @@ def issue_question():
         "correctAnswerDigest": answer_digest(correct_answer, answer_salt),
         "answerSalt": answer_salt,
         "battleId": battle_id, "teamId": team_id,
-        "weekKey": week_key(), "userId": identity["uid"],
+        "weekKey": current_week, "userId": identity["uid"],
         "status": "awaiting_answer", "createdAt": now,
     }
     turn_ref = _doc(TURNS, turn_id)
@@ -620,10 +704,27 @@ def issue_question():
         if player.get("activeTurnId"):
             raise ValueError(
                 "Finish your current question before requesting another")
+        current_history = _snapshot_dict(
+            history_ref.get(transaction=transaction)) or {}
+        current_ids = list(
+            current_history.get("questionIds", [])
+            if current_history.get("weekKey") == current_week
+            else []
+        )
+        if question["id"] in current_ids:
+            raise ValueError(
+                "That question was already shown. Please draw another question")
+        current_ids.append(question["id"])
         player["activeTurnId"] = turn_id
         states[identity["uid"]] = player
         transaction.update(
             battle_ref, {"memberStates": states, "updatedAt": now})
+        transaction.set(history_ref, {
+            "userId": identity["uid"],
+            "weekKey": current_week,
+            "questionIds": current_ids,
+            "updatedAt": now,
+        })
         transaction.set(turn_ref, stored)
 
     try:
@@ -714,10 +815,13 @@ def answer_question(turn_id: str):
             turn.get("correctAnswerDigest", ""),
         )
         rules = amounts_for(turn["difficulty"])
+        correct_answer = correct_answer_from_question(turn)
+        if not correct_answer:
+            raise ValueError("The correct answer could not be verified")
         state["questionsAnswered"] = int(state.get("questionsAnswered", 0)) + 1
         battle["questionsAnswered"] = int(
             battle.get("questionsAnswered", 0)) + 1
-        update = {"answeredAt": _now_iso(), "submittedAnswer": str(submitted)}
+        update = {"answeredAt": _now_iso()}
         if correct:
             state["correctAnswers"] = int(state.get("correctAnswers", 0)) + 1
             battle["correctAnswers"] = int(battle.get("correctAnswers", 0)) + 1
@@ -726,8 +830,6 @@ def answer_question(turn_id: str):
             state["health"] = max(
                 0, int(state.get("health", 0)) - rules["penalty"])
             state["activeTurnId"] = None
-            update.update(
-                {"status": "resolved", "wasCorrect": False, "penalty": rules["penalty"]})
             if all(int((states.get(uid) if uid != identity["uid"] else state).get("health", 0)) <= 0 for uid in states):
                 battle["status"] = "party_defeated"
                 battle["partyDefeatedAt"] = _now_iso()
@@ -735,23 +837,38 @@ def answer_question(turn_id: str):
         battle["memberStates"] = states
         battle["updatedAt"] = _now_iso()
         transaction.update(battle_ref, battle)
-        transaction.update(turn_ref, update)
-        return correct, rules, state, battle
+        if correct:
+            transaction.update(turn_ref, update)
+        else:
+            # Incorrect turns need no follow-up action, so remove the temporary
+            # question immediately rather than retaining an answer log.
+            transaction.delete(turn_ref)
+        return correct, rules, state, battle, turn["difficulty"], correct_answer
 
     try:
-        correct, rules, state, battle = run(transaction)
+        correct, rules, state, battle, answered_difficulty, correct_answer = run(
+            transaction
+        )
     except LookupError as exc:
         return jsonify({"error": str(exc)}), 404
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 409
-    response = {"correct": correct, "difficulty": normalize_difficulty(
-        _snapshot_dict(turn_ref.get())["difficulty"])}
+    response = {
+        "correct": correct,
+        "difficulty": normalize_difficulty(answered_difficulty),
+    }
     if correct:
         response["actions"] = {
             "attack": rules["damage"], "heal": rules["healing"]}
     else:
         response.update(
-            {"damageTaken": rules["penalty"], "health": state["health"], "battleStatus": battle["status"]})
+            {
+                "correctAnswer": correct_answer,
+                "damageTaken": rules["penalty"],
+                "health": state["health"],
+                "battleStatus": battle["status"],
+            }
+        )
     return jsonify(response)
 
 
@@ -824,8 +941,9 @@ def choose_action(turn_id: str):
         battle["memberStates"] = states
         battle["updatedAt"] = _now_iso()
         transaction.update(battle_ref, battle)
-        transaction.update(turn_ref, {"status": "resolved", "action": action,
-                           "targetUserId": target_uid or None, "resolvedAt": _now_iso()})
+        # Correct turns are retained only while the player is choosing an
+        # action. Once resolved, the temporary question document is deleted.
+        transaction.delete(turn_ref)
         result["battleStatus"] = battle["status"]
         return result
 
