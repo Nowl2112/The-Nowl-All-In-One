@@ -339,6 +339,7 @@ function CalendarPage() {
     const [upcomingItems, setUpcomingItems] = useState([]);
     const [status, setStatus] = useState("loading");
     const [error, setError] = useState("");
+    const [isMainUser, setIsMainUser] = useState(false);
 
     const [modalOpen, setModalOpen] = useState(false);
     const [editingItem, setEditingItem] = useState(null);
@@ -591,6 +592,7 @@ async function handleConnectTelegram() {
             }
 
             setItems(Array.isArray(itemsData.items) ? itemsData.items : []);
+            setIsMainUser(Boolean(itemsData.isMainUser));
             setUpcomingItems(
                 Array.isArray(upcomingData.items) ? upcomingData.items : [],
             );
@@ -698,7 +700,7 @@ async function handleConnectTelegram() {
             dueDate: rawDue.slice(0, 10) || fallbackDate,
             dueTime: rawDue.slice(11, 16) || "17:00",
             allDay: Boolean(item.allDay),
-            visibility: item.visibility || "personal",
+            visibility: isMainUser ? (item.visibility || "personal") : "personal",
             taggedUserIds: Array.isArray(item.taggedUserIds)
                 ? item.taggedUserIds
                 : [],
@@ -1887,13 +1889,13 @@ async function handleConnectTelegram() {
                                             )
                                         }
                                     >
-                                        {VISIBILITIES.map((visibility) => (
+                                        {(isMainUser ? VISIBILITIES : ["personal"]).map((visibility) => (
                                             <option
                                                 key={visibility}
                                                 value={visibility}
                                             >
                                                 {visibility === "all"
-                                                    ? "All users"
+                                                    ? "All users (main group)"
                                                     : visibility[0].toUpperCase() +
                                                       visibility.slice(1)}
                                             </option>

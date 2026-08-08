@@ -152,7 +152,6 @@ def admin_create_user():
     ), 201
 
 
-
 @bp.get("/api/auth/session")
 def auth_session():
     identity, error = _authenticated_identity()
@@ -171,6 +170,7 @@ def auth_session():
             "email": identity["email"],
             "displayName": user.get("displayName"),
             "profilePicLink": _profile_picture_link(user),
+            "isMainUser": _is_main_user(user),
             "mustResetPassword": bool(
                 identity["claims"].get(
                     "mustResetPassword",
@@ -179,7 +179,6 @@ def auth_session():
             ),
         }
     )
-
 
 
 @bp.post("/api/auth/complete-password-reset")
@@ -236,4 +235,3 @@ def complete_password_reset():
             )
         }
     )
-

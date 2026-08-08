@@ -580,7 +580,12 @@ def import_calendar_items_to_task_board(board_id: str):
         if not calendar_item:
             skipped_items.append({"id": requested_id, "reason": "not_found"})
             continue
-        if not _calendar_item_is_visible_to_user(calendar_item, identity["uid"], family_name):
+        if not _calendar_item_is_visible_to_user(
+            calendar_item,
+            identity["uid"],
+            family_name,
+            _is_main_user(user),
+        ):
             skipped_items.append(
                 {"id": requested_id, "reason": "not_accessible"})
             continue

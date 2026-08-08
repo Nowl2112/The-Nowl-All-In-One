@@ -53,6 +53,11 @@ def create_calendar_item():
             {"error": "visibility must be personal, family, or all"}
         ), 400
 
+    if not _is_main_user(user) and visibility != "personal":
+        return jsonify({
+            "error": "Only main users can create shared calendar items"
+        }), 403
+
     family_name = _normalize_family_name(user.get("familyName"))
     if visibility == "family" and not family_name:
         return jsonify(
@@ -222,7 +227,6 @@ def create_calendar_item():
     ), 201
 
 
-
 @bp.patch("/api/calendar/items/<item_id>")
 def update_calendar_item(item_id: str):
     firestore_error = _require_firestore()
@@ -346,6 +350,11 @@ def update_calendar_item(item_id: str):
                 )
             }
         ), 400
+
+    if not _is_main_user(user) and visibility != "personal":
+        return jsonify({
+            "error": "Only main users can use shared calendar visibility"
+        }), 403
 
     family_name = _normalize_family_name(
         user.get("familyName")
@@ -652,7 +661,6 @@ def update_calendar_item(item_id: str):
     ), 200
 
 
-
 @bp.delete("/api/calendar/items/<item_id>")
 def delete_calendar_item(item_id: str):
     firestore_error = _require_firestore()
@@ -725,7 +733,6 @@ def delete_calendar_item(item_id: str):
     ), 200
 
 
-
 @bp.get("/api/calendar/items")
 def get_visible_calendar_items():
     firestore_error = _require_firestore()
@@ -757,6 +764,7 @@ def get_visible_calendar_items():
         items = _load_calendar_items(
             uid=identity["uid"],
             family_name=family_name,
+            is_main_user=_is_main_user(user),
             visibility_scope="visible",
             item_type=item_type,
             range_start=range_start,
@@ -774,9 +782,9 @@ def get_visible_calendar_items():
             "items": items,
             "count": len(items),
             "familyName": family_name or None,
+            "isMainUser": _is_main_user(user),
         }
     )
-
 
 
 @bp.get("/api/calendar/items/own")
@@ -802,7 +810,6 @@ def get_own_calendar_items():
     return jsonify({"items": items, "count": len(items)})
 
 
-
 @bp.get("/api/calendar/items/tagged")
 def get_tagged_calendar_items():
     firestore_error = _require_firestore()
@@ -819,7 +826,6 @@ def get_tagged_calendar_items():
         visibility_scope="tagged",
     )
     return jsonify({"items": items, "count": len(items)})
-
 
 
 @bp.get("/api/calendar/items/upcoming")
@@ -851,6 +857,7 @@ def get_upcoming_calendar_items():
     visible_items = _load_calendar_items(
         uid=identity["uid"],
         family_name=family_name,
+        is_main_user=_is_main_user(user),
         visibility_scope="visible",
         item_type=item_type,
         range_start=now,
@@ -883,7 +890,6 @@ def get_upcoming_calendar_items():
             "limit": limit,
         }
     )
-
 
 
 @bp.patch("/api/calendar/tasks/<item_id>/status")
@@ -956,4 +962,3 @@ def update_calendar_task_status(item_id: str):
         response_item = _calendar_item_response(series_id, item)
 
     return jsonify({"message": "Task status updated", "item": response_item})
-

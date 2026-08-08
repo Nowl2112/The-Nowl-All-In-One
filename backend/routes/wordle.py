@@ -14,6 +14,7 @@ from core import (
     _get_monthly_podium,
     _get_or_create_user,
     _get_wordle_stats,
+    _is_main_user,
     _letter_statuses,
     _list_historical_wordle_podiums,
     _month_key,
@@ -71,6 +72,7 @@ def get_current_wordle_player():
             or (email.split("@")[0] if email else "Player")
         ),
         "profilePicLink": _profile_picture_link(user),
+        "isMainUser": _is_main_user(user),
         "rank": (
             leaderboard_entry.get("rank")
             if leaderboard_entry
@@ -390,9 +392,18 @@ def get_wordle_leaderboard():
     if firestore_error:
         return firestore_error
 
-    _, error = _authenticated_identity()
+    identity, error = _authenticated_identity()
     if error:
         return error
+
+    user = _get_or_create_user(
+        identity["uid"], identity["email"], identity["name"]
+    )
+    scope = str(request.args.get("scope") or "global").strip().lower()
+    if scope not in {"global", "main"}:
+        return jsonify({"error": "scope must be global or main"}), 400
+    if scope == "main" and not _is_main_user(user):
+        return jsonify({"error": "The main-user leaderboard is private"}), 403
 
     try:
         limit = max(
@@ -412,12 +423,16 @@ def get_wordle_leaderboard():
                 "error": "month must use YYYY-MM",
             }), 400
 
-        players = _build_leaderboard(month_key)
+        players = _build_leaderboard(
+            month_key,
+            main_users_only=scope == "main",
+        )
 
         return jsonify({
             "leaderboard": players[:limit],
             "totalPlayers": len(players),
             "month": month_key,
+            "scope": scope,
         })
 
     except Exception as error:

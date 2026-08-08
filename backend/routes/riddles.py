@@ -3,6 +3,7 @@ from flask import Blueprint, current_app, jsonify, request
 from core import (
     _authenticated_identity,
     _get_or_create_user,
+    _is_main_user,
     _profile_picture_link,
     _require_firestore,
 )
@@ -320,6 +321,15 @@ def get_riddle_leaderboard():
     if error:
         return error
 
+    requesting_user = _get_or_create_user(
+        identity["uid"], identity["email"], identity.get("name")
+    )
+    scope = str(request.args.get("scope") or "global").strip().lower()
+    if scope not in {"global", "main"}:
+        return jsonify({"error": "scope must be global or main"}), 400
+    if scope == "main" and not _is_main_user(requesting_user):
+        return jsonify({"error": "The main-user leaderboard is private"}), 403
+
     limit = max(1, min(request.args.get("limit", 100, type=int), 500))
     users_by_id = {
         snapshot.id: (snapshot.to_dict() or {})
@@ -334,6 +344,8 @@ def get_riddle_leaderboard():
     players = []
     for uid, player in player_documents:
         user = users_by_id.get(uid, {})
+        if scope == "main" and not _is_main_user(user):
+            continue
         email = player.get("email") or user.get("email") or ""
         players.append(
             {
@@ -397,8 +409,11 @@ def get_riddle_leaderboard():
             "activeMonth": active_month,
             "maxCombo": MAX_COMBO,
             "monthlyPodium": monthly_podium,
-            "previousPodium": history[0] if history else None,
+            "previousPodium": (
+                history[0] if history and scope == "global" else None
+            ),
             "rankedBy": "allTimeScore",
+            "scope": scope,
         }
     )
 

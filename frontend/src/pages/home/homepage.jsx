@@ -269,6 +269,7 @@ function HomePage() {
     const [leaderboardStatus, setLeaderboardStatus] = useState("idle");
     const [leaderboardError, setLeaderboardError] = useState("");
     const [leaderboardGame, setLeaderboardGame] = useState("wordle");
+    const [leaderboardScope, setLeaderboardScope] = useState("global");
     const [leaderboardMeta, setLeaderboardMeta] = useState({
         activeMonth: "",
         maxCombo: 10,
@@ -395,7 +396,7 @@ function HomePage() {
             try {
                 const headers = await getAuthHeaders();
                 const response = await fetch(
-                    `${API_BASE_URL}/api/games/${leaderboardGame === "wordle" ? "wordle" : "riddles"}/leaderboard?limit=100`,
+                    `${API_BASE_URL}/api/games/${leaderboardGame === "wordle" ? "wordle" : "riddles"}/leaderboard?limit=100&scope=${leaderboardScope}`,
                     {
                         method: "GET",
                         headers,
@@ -437,11 +438,16 @@ function HomePage() {
                 setLeaderboardStatus("error");
             }
         },
-        [currentUser, getAuthHeaders, leaderboardGame],
+        [currentUser, getAuthHeaders, leaderboardGame, leaderboardScope],
     );
 
     const loadPreviousPodium = useCallback(async (signal) => {
         if (!currentUser) return;
+        if (leaderboardScope === "main") {
+            setPreviousPodium(null);
+            setPodiumStatus("idle");
+            return;
+        }
         setPodiumStatus("loading");
         setPodiumError("");
         try {
@@ -465,10 +471,11 @@ function HomePage() {
             setPodiumError(error?.message || "Could not load last month’s podium.");
             setPodiumStatus("error");
         }
-    }, [currentUser, getAuthHeaders, leaderboardGame]);
+    }, [currentUser, getAuthHeaders, leaderboardGame, leaderboardScope]);
 
     const loadPodiumHistory = useCallback(async () => {
         if (!currentUser || podiumHistoryStatus === "loading") return;
+        if (leaderboardScope === "main") return;
         setPodiumHistoryStatus("loading");
         setPodiumHistoryError("");
         try {
@@ -488,7 +495,13 @@ function HomePage() {
             setPodiumHistoryError(error?.message || "Could not load podium history.");
             setPodiumHistoryStatus("error");
         }
-    }, [currentUser, getAuthHeaders, leaderboardGame, podiumHistoryStatus]);
+    }, [currentUser, getAuthHeaders, leaderboardGame, leaderboardScope, podiumHistoryStatus]);
+
+    useEffect(() => {
+        if (playerStatus === "success" && !currentPlayer?.isMainUser) {
+            setLeaderboardScope("global");
+        }
+    }, [currentPlayer?.isMainUser, playerStatus]);
 
     useEffect(() => {
         setPreviousPodium(null);
@@ -1591,6 +1604,29 @@ function HomePage() {
                                 </button>
                             </div>
 
+                            {currentPlayer?.isMainUser && (
+                                <div className="leaderboard-switch" role="tablist" aria-label="Choose leaderboard group">
+                                    <button
+                                        type="button"
+                                        role="tab"
+                                        aria-selected={leaderboardScope === "global"}
+                                        className={leaderboardScope === "global" ? "is-active" : ""}
+                                        onClick={() => setLeaderboardScope("global")}
+                                    >
+                                        Global
+                                    </button>
+                                    <button
+                                        type="button"
+                                        role="tab"
+                                        aria-selected={leaderboardScope === "main"}
+                                        className={leaderboardScope === "main" ? "is-active" : ""}
+                                        onClick={() => setLeaderboardScope("main")}
+                                    >
+                                        Family
+                                    </button>
+                                </div>
+                            )}
+
                             <button
                                 type="button"
                                 className="leaderboard-refresh-button"
@@ -1602,13 +1638,15 @@ function HomePage() {
                         </div>
                     </div>
 
-                    <PreviousMonthPodium
-                        podium={previousPodium}
-                        status={podiumStatus}
-                        error={podiumError}
-                        game={leaderboardGame}
-                        onOpenHistory={openPodiumHistory}
-                    />
+                    {leaderboardScope === "global" && (
+                        <PreviousMonthPodium
+                            podium={previousPodium}
+                            status={podiumStatus}
+                            error={podiumError}
+                            game={leaderboardGame}
+                            onOpenHistory={openPodiumHistory}
+                        />
+                    )}
 
                     {leaderboardStatus === "loading" && (
                         <div className="leaderboard-state">

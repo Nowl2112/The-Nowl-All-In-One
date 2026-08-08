@@ -672,6 +672,7 @@ def _calendar_item_is_visible_to_user(
     item: dict[str, Any],
     uid: str,
     family_name: str,
+    is_main_user: bool = False,
 ) -> bool:
     visibility = str(item.get("visibility") or "").strip().lower()
     owner_id = str(item.get("ownerId") or "").strip()
@@ -680,12 +681,13 @@ def _calendar_item_is_visible_to_user(
     if owner_id == uid or uid in tagged_user_ids:
         return True
 
-    if visibility == "all":
+    if visibility == "all" and is_main_user:
         return True
 
     item_family = _normalize_family_name(item.get("familyName"))
     return bool(
-        visibility == "family"
+        is_main_user
+        and visibility == "family"
         and family_name
         and item_family == family_name
     )
@@ -695,6 +697,7 @@ def _load_calendar_items(
     *,
     uid: str,
     family_name: str,
+    is_main_user: bool = False,
     visibility_scope: str,
     item_type: str | None = None,
     range_start: datetime | None = None,
@@ -726,17 +729,19 @@ def _load_calendar_items(
             include = uid in tagged_user_ids
         elif visibility_scope == "family":
             include = bool(
-                family_name
+                is_main_user
+                and family_name
                 and visibility == "family"
                 and item_family == family_name
             )
         elif visibility_scope == "all-users":
-            include = visibility == "all"
+            include = is_main_user and visibility == "all"
         elif visibility_scope == "visible":
             include = _calendar_item_is_visible_to_user(
                 item,
                 uid,
                 family_name,
+                is_main_user,
             )
 
         if include:
@@ -1031,6 +1036,7 @@ def _get_user_week_ahead_items(
     visible_items = _load_calendar_items(
         uid=uid,
         family_name=family_name,
+        is_main_user=_is_main_user(user),
         visibility_scope="visible",
         range_start=now,
         range_end=end_time,
@@ -1336,6 +1342,11 @@ def _get_or_create_user(
         user.update(updates)
 
     return user
+
+
+def _is_main_user(user: dict[str, Any] | None) -> bool:
+    """Return whether a Firestore user belongs to the private main group."""
+    return isinstance(user, dict) and user.get("is_main_user") is True
 
 
 def _default_wordle_stats(
@@ -1722,7 +1733,11 @@ def _letter_statuses(
 # Leaderboard helpers
 # ---------------------------------------------------------------------------
 
-def _build_leaderboard(month_key: str | None = None) -> list[dict[str, Any]]:
+def _build_leaderboard(
+    month_key: str | None = None,
+    *,
+    main_users_only: bool = False,
+) -> list[dict[str, Any]]:
     selected_month = month_key or _month_key()
     snapshots = (
         FIRESTORE_DB
@@ -1740,6 +1755,8 @@ def _build_leaderboard(month_key: str | None = None) -> list[dict[str, Any]]:
         )
 
         user = _read_document("users", uid) or {}
+        if main_users_only and not _is_main_user(user):
+            continue
 
         email = _normalize_email(
             user.get("email")
