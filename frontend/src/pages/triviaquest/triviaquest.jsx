@@ -729,19 +729,18 @@ async function copyInvite() {
 
                 <section className="quest-panel quest-leaderboard">
                     <div className="quest-section-heading">
-                        <div><p className="quest-eyebrow">Weekly standings</p><h2>Damage leaderboard</h2></div>
+                        <div><p className="quest-eyebrow">Weekly standings</p><h2>Team damage leaderboard</h2></div>
                     </div>
                     {leaderboard.length === 0 ? (
                         <div className="quest-empty">No party has entered the arena yet.</div>
                     ) : (
                         <div className="quest-ranking-list">
                             {leaderboard.map((entry) => (
-                                <article key={`${entry.teamId}-${entry.uid}`} className={entry.uid === currentUser?.uid ? "is-current" : ""}>
+                                <article key={entry.teamId} className={entry.teamId === team?.id ? "is-current" : ""}>
                                     <strong className="quest-rank">#{entry.rank}</strong>
-                                    <PlayerAvatar player={entry} />
                                     <div>
-                                        <strong>{entry.displayName}{entry.winner ? " · Winner" : ""}</strong>
-                                        <span>{entry.teamName} · {entry.questionsAnswered} questions</span>
+                                        <strong>{entry.teamName}{entry.defeated ? " · Boss defeated" : ""}</strong>
+                                        <span>{entry.memberCount} players · {entry.questionsAnswered} questions</span>
                                     </div>
                                     <div className="quest-ranking-progress"><span style={{ width: `${entry.damagePercent}%` }} /></div>
                                     <strong>{Number(entry.damageDealt || entry.damage || 0).toLocaleString()} damage</strong>
