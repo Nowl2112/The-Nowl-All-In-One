@@ -15,7 +15,7 @@ PLAYER_MAX_HEALTH = 100
 # Weekly health is based on the normal (medium) attack cadence. Keeping the
 # target in successful attacks per player makes future damage rebalancing easy
 # to reason about and keeps similarly active teams fair at every party size.
-TARGET_SUCCESSFUL_ATTACKS_PER_PLAYER = 240
+TARGET_SUCCESSFUL_ATTACKS_PER_PLAYER = 130
 EXPECTED_ATTACK_DAMAGE = 50
 INVITE_TOKEN_BYTES = 32
 MAX_QUESTION_FETCH_ATTEMPTS = 12
