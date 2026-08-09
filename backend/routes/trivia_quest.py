@@ -219,7 +219,22 @@ def _battle_response(battle_id: str, battle: dict) -> dict:
         "correctAnswers": battle.get("correctAnswers", 0),
         "startedAt": battle.get("startedAt"),
         "defeatedAt": battle.get("defeatedAt"),
+        "winners": _battle_winners(battle),
     }
+
+
+def _battle_winners(battle: dict) -> list[dict]:
+    """Return the immutable victory result, with a legacy-data fallback."""
+    stored = battle.get("winners")
+    if isinstance(stored, list):
+        return [winner for winner in stored if isinstance(winner, dict)]
+    if battle.get("status") != "victory":
+        return []
+    return [
+        {"uid": uid, "damage": int(state.get("damageDealt", 0))}
+        for uid, state in (battle.get("memberStates") or {}).items()
+        if int(state.get("damageDealt", 0)) > 0
+    ]
 
 
 def _current_team(uid: str):
@@ -981,6 +996,12 @@ def choose_action(turn_id: str):
         actor["healingDone"] = int(actor.get("healingDone", 0)) + healing_done
         states[identity["uid"]] = actor
         battle["memberStates"] = states
+        if battle.get("status") == "victory":
+            battle["winners"] = [
+                {"uid": uid, "damage": int(state.get("damageDealt", 0))}
+                for uid, state in states.items()
+                if int(state.get("damageDealt", 0)) > 0
+            ]
         battle["updatedAt"] = _now_iso()
         transaction.update(battle_ref, battle)
         # Correct turns are retained only while the player is choosing an
@@ -1009,33 +1030,47 @@ def leaderboard():
     selected_week = str(request.args.get("week") or week_key()).strip()
     if not re.fullmatch(r"\d{4}-W\d{2}", selected_week):
         return jsonify({"error": "week must use YYYY-Www"}), 400
-    battles = []
+    players = []
+    completed_battles = []
     for snapshot in FIRESTORE_DB.collection(BATTLES).where("weekKey", "==", selected_week).stream():
         battle = snapshot.to_dict() or {}
         team = _snapshot_dict(
             _doc(TEAMS, battle.get("teamId", "")).get()) or {}
         maximum = max(1, int(battle.get("bossMaxHealth", 1)))
-        remaining = max(0, int(battle.get("bossHealth", maximum)))
         defeated = battle.get("status") == "victory"
-        battles.append({
+        winners = _battle_winners(battle)
+        winner_ids = {winner.get("uid") for winner in winners}
+        completed_battles.append({
             "teamId": battle.get("teamId"), "teamName": team.get("name", "Team"),
-            "memberCount": len(team.get("memberIds", [])), "defeated": defeated,
-            "bossHealth": remaining, "bossMaxHealth": maximum,
-            "damagePercent": round((maximum - remaining) * 100 / maximum, 2),
+            "defeated": defeated,
             "defeatedAt": battle.get("defeatedAt"),
-            "victoryDurationSeconds": battle.get("victoryDurationSeconds"),
-            "questionsAnswered": battle.get("questionsAnswered", 0),
-            "correctAnswers": battle.get("correctAnswers", 0),
+            "winners": winners,
         })
-    battles.sort(key=lambda item: (
-        0 if item["defeated"] else 1,
-        (
-            item["victoryDurationSeconds"]
-            if item["defeated"] and item["victoryDurationSeconds"] is not None
-            else (10**18 if item["defeated"] else item["bossHealth"])
-        ),
+        for uid, state in (battle.get("memberStates") or {}).items():
+            user = _snapshot_dict(_doc("users", uid).get()) or {}
+            damage = max(0, int(state.get("damageDealt", 0)))
+            players.append({
+                **_public_member(uid, user),
+                "teamId": battle.get("teamId"),
+                "teamName": team.get("name", "Team"),
+                "damage": damage,
+                "damageDealt": damage,
+                "damagePercent": round(damage * 100 / maximum, 2),
+                "questionsAnswered": int(state.get("questionsAnswered", 0)),
+                "correctAnswers": int(state.get("correctAnswers", 0)),
+                "winner": uid in winner_ids,
+                "teamDefeated": defeated,
+            })
+    players.sort(key=lambda item: (
+        -item["damage"],
         -item["correctAnswers"],
+        item["displayName"].casefold(),
+        item["uid"],
     ))
-    for index, entry in enumerate(battles, 1):
+    for index, entry in enumerate(players, 1):
         entry["rank"] = index
-    return jsonify({"weekKey": selected_week, "leaderboard": battles})
+    return jsonify({
+        "weekKey": selected_week,
+        "leaderboard": players,
+        "completedBattles": completed_battles,
+    })
