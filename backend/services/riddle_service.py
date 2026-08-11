@@ -9,6 +9,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import requests
+from google.cloud import firestore
 
 from services.firebase import get_db
 
@@ -135,21 +136,70 @@ def get_or_create_daily_riddle(date_string: str | None = None) -> dict[str, Any]
     db = get_db()
     if db is None:
         raise RuntimeError("Firestore is not configured")
+
     date_string = date_string or today_key()
-    reference = db.collection("riddleDaily").document(date_string)
-    existing = reference.get()
+    daily_reference = db.collection("riddleDaily").document(date_string)
+    existing = daily_reference.get()
     if existing.exists:
         return existing.to_dict() or {}
-    document = {**_api_league_riddle(), "date": date_string,
-                "createdAt": now_iso()}
+
     try:
-        reference.create(document)
-        return document
-    except Exception:
-        winner = reference.get()
-        if winner.exists:
-            return winner.to_dict() or {}
-        raise
+        max_attempts = max(1, int(os.getenv("RIDDLE_MAX_FETCH_ATTEMPTS", "25")))
+    except ValueError as exc:
+        raise RuntimeError("RIDDLE_MAX_FETCH_ATTEMPTS must be an integer") from exc
+
+    for _ in range(max_attempts):
+        candidate = _api_league_riddle()
+        history_reference = db.collection("riddleHistory").document(candidate["id"])
+        document = {
+            **candidate,
+            "date": date_string,
+            "createdAt": now_iso(),
+        }
+        transaction = db.transaction()
+
+        @firestore.transactional
+        def claim_riddle(current_transaction):
+            current_daily = daily_reference.get(transaction=current_transaction)
+            if current_daily.exists:
+                return current_daily.to_dict() or {}
+
+            historical = history_reference.get(transaction=current_transaction)
+            if historical.exists:
+                return None
+
+            # This also protects riddles saved before riddleHistory was introduced.
+            previous_daily = list(
+                db.collection("riddleDaily")
+                .where("id", "==", candidate["id"])
+                .limit(1)
+                .stream(transaction=current_transaction)
+            )
+            if previous_daily:
+                return None
+
+            current_transaction.create(daily_reference, document)
+            current_transaction.create(
+                history_reference,
+                {
+                    "riddleId": candidate["id"],
+                    "firstUsedDate": date_string,
+                    "question": candidate["question"],
+                    "answer": candidate["answer"],
+                    "source": candidate["source"],
+                    "createdAt": document["createdAt"],
+                },
+            )
+            return document
+
+        claimed = claim_riddle(transaction)
+        if claimed is not None:
+            return claimed
+
+    raise RuntimeError(
+        "API League repeatedly returned riddles that have already been used. "
+        f"Tried {max_attempts} times."
+    )
 
 
 def default_player(uid: str, email: str) -> dict[str, Any]:
