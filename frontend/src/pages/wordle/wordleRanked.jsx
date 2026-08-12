@@ -30,6 +30,14 @@ const EMPTY_STATS = {
     bestCombo: 0,
 };
 
+const REVEAL_STEP_MS = 150;
+const REVEAL_DURATION_MS = 600;
+const INVALID_SHAKE_MS = 450;
+
+function wait(milliseconds) {
+    return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
 function WordleRanked() {
     const navigate = useNavigate();
     const { currentUser, authLoading } = useAuth();
@@ -42,6 +50,13 @@ function WordleRanked() {
     const [stats, setStats] = useState(EMPTY_STATS);
     const [answer, setAnswer] = useState("");
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [revealingRow, setRevealingRow] = useState(-1);
+    const [shakingRow, setShakingRow] = useState(-1);
+    const [pressedKey, setPressedKey] = useState("");
+    const [winningRow, setWinningRow] = useState(-1);
+    const [showConfetti, setShowConfetti] = useState(false);
+    const [statsPulse, setStatsPulse] = useState(0);
+    const [visibleGuessCount, setVisibleGuessCount] = useState(0);
 
     useEffect(() => {
         if (authLoading) {
@@ -83,6 +98,9 @@ function WordleRanked() {
                 }
 
                 setGuesses(Array.isArray(data.guesses) ? data.guesses : []);
+                setVisibleGuessCount(
+                    Array.isArray(data.guesses) ? data.guesses.length : 0,
+                );
                 setEvaluations(
                     Array.isArray(data.evaluations) ? data.evaluations : [],
                 );
@@ -121,7 +139,7 @@ function WordleRanked() {
             correct: 3,
         };
 
-        guesses.forEach((guess, guessIndex) => {
+        guesses.slice(0, visibleGuessCount).forEach((guess, guessIndex) => {
             const result = evaluations[guessIndex] || [];
 
             guess.split("").forEach((letter, letterIndex) => {
@@ -139,7 +157,7 @@ function WordleRanked() {
         });
 
         return statuses;
-    }, [evaluations, guesses]);
+    }, [evaluations, guesses, visibleGuessCount]);
 
     const submitGuess = useCallback(async () => {
         if (
@@ -182,27 +200,44 @@ function WordleRanked() {
                 setMessage(data.error || "Could not submit guess.");
 
                 // Invalid dictionary words do not consume an attempt.
-                // Clear the row so the player can immediately enter another word.
+                // Shake first, then clear the row for the next word.
                 if (data.code === "invalid_word") {
+                    setShakingRow(guesses.length);
+                    await wait(INVALID_SHAKE_MS);
+                    setShakingRow(-1);
                     setCurrentGuess("");
                 }
                 return;
             }
 
+            const completedRow = guesses.length;
             setGuesses((previous) => [...previous, data.guess]);
             setEvaluations((previous) => [
                 ...previous,
                 data.evaluation,
             ]);
             setCurrentGuess("");
+            setRevealingRow(completedRow);
+
+            await wait(
+                REVEAL_DURATION_MS +
+                    (WORD_LENGTH - 1) * REVEAL_STEP_MS,
+            );
+
+            setRevealingRow(-1);
+            setVisibleGuessCount(completedRow + 1);
             setStats(data.stats);
             setGameStatus(data.status);
             setAnswer(data.answer || "");
+            setStatsPulse((previous) => previous + 1);
 
             if (data.status === "won") {
+                setWinningRow(completedRow);
+                setShowConfetti(true);
                 setMessage(
                     `Correct! You gained ${data.pointsGained} ranked points.`,
                 );
+                window.setTimeout(() => setShowConfetti(false), 2400);
             } else if (data.status === "lost") {
                 setMessage(`The word was ${data.answer}. Your combo was reset.`);
             }
@@ -212,13 +247,18 @@ function WordleRanked() {
         } finally {
             setIsSubmitting(false);
         }
-    }, [currentGuess, currentUser, gameStatus, isSubmitting]);
+    }, [currentGuess, currentUser, gameStatus, guesses.length, isSubmitting]);
 
     const handleKey = useCallback(
         (key) => {
             if (gameStatus !== "playing" || isSubmitting) {
                 return;
             }
+
+            setPressedKey(key);
+            window.setTimeout(() => {
+                setPressedKey((current) => (current === key ? "" : current));
+            }, 140);
 
             if (key === "ENTER") {
                 void submitGuess();
@@ -272,7 +312,16 @@ function WordleRanked() {
             : Array(WORD_LENGTH).fill("");
 
         return (
-            <div className="wordle-row" key={rowIndex}>
+            <div
+                className={[
+                    "wordle-row",
+                    shakingRow === rowIndex ? "wordle-row--shake" : "",
+                    winningRow === rowIndex ? "wordle-row--win" : "",
+                ]
+                    .filter(Boolean)
+                    .join(" ")}
+                key={rowIndex}
+            >
                 {rowValue.split("").map((letter, columnIndex) => {
                     const status = statuses[columnIndex];
 
@@ -284,10 +333,20 @@ function WordleRanked() {
                                 letter.trim() && !status
                                     ? "wordle-tile--filled"
                                     : "",
+                                revealingRow === rowIndex && status
+                                    ? "wordle-tile--revealing"
+                                    : "",
                             ]
                                 .filter(Boolean)
                                 .join(" ")}
                             key={`${rowIndex}-${columnIndex}`}
+                            style={
+                                revealingRow === rowIndex
+                                    ? {
+                                          animationDelay: `${columnIndex * REVEAL_STEP_MS}ms`,
+                                      }
+                                    : undefined
+                            }
                         >
                             {letter}
                         </div>
@@ -326,10 +385,30 @@ function WordleRanked() {
 
             <div className="wordle-layout">
                 <section className="wordle-game-card">
+                    {showConfetti && (
+                        <div className="wordle-confetti" aria-hidden="true">
+                            {Array.from({ length: 24 }, (_, index) => (
+                                <i
+                                    key={index}
+                                    style={{
+                                        "--confetti-index": index,
+                                        "--confetti-delay": `${(index % 8) * 45}ms`,
+                                        "--confetti-left": `${4 + (index % 12) * 8}%`,
+                                        "--confetti-drift": `${(index % 5) * 13 - 26}px`,
+                                    }}
+                                />
+                            ))}
+                        </div>
+                    )}
                     <div className="wordle-game-header">
                         <div>
                             <p className="wordle-small-label">Ranked score</p>
-                            <strong>{stats.rankScore}</strong>
+                            <strong
+                                key={`score-${statsPulse}`}
+                                className={statsPulse ? "wordle-stat--pulse" : ""}
+                            >
+                                {stats.rankScore}
+                            </strong>
                         </div>
 
                         <div className="wordle-attempt-counter">
@@ -382,6 +461,9 @@ function WordleRanked() {
                                                 status
                                                     ? `wordle-key--${status}`
                                                     : "",
+                                                pressedKey === key
+                                                    ? "wordle-key--pressed"
+                                                    : "",
                                             ]
                                                 .filter(Boolean)
                                                 .join(" ")}
@@ -425,7 +507,12 @@ function WordleRanked() {
                             <h2>{stats.rankScore} points</h2>
                         </div>
 
-                        <div className="wordle-rating-circle">
+                        <div
+                            key={`combo-${statsPulse}`}
+                            className={`wordle-rating-circle ${
+                                statsPulse ? "wordle-rating-circle--pulse" : ""
+                            }`}
+                        >
                             ×{stats.combo}
                         </div>
                     </div>
