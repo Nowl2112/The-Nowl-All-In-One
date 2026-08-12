@@ -3007,14 +3007,19 @@ def _extract_ai_message_content(
                     if isinstance(part_text, str):
                         text_parts.append(part_text)
 
-        # Some reasoning-model providers return the final answer in a
-        # provider-specific field rather than message.content.
+        # Some providers return the final answer in a provider-specific field
+        # rather than message.content.
         if not any(part.strip() for part in text_parts):
             for field_name in (
                 "final",
                 "final_answer",
                 "answer",
                 "output_text",
+                # DeepSeek models served through some Hugging Face inference
+                # providers have been observed putting JSON output here while
+                # returning an empty content field.
+                "reasoning_content",
+                "reasoning",
             ):
                 value = message.get(field_name)
                 if isinstance(value, str) and value.strip():
